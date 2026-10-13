@@ -12,7 +12,11 @@ import {
   Flame,
   Menu,
   X,
-  Users
+  Users,
+  Lock,
+  Shield,
+  LogOut,
+  User
 } from 'lucide-react';
 
 export const Header: React.FC = () => {
@@ -25,7 +29,11 @@ export const Header: React.FC = () => {
     isDarkMode,
     toggleDarkMode,
     totalVisitors,
-    onlineVisitors
+    onlineVisitors,
+    currentRole,
+    currentUser,
+    setAdminLoginModalOpen,
+    logoutStaff
   } = useNewsApp();
 
   const [searchOpen, setSearchOpen] = useState(false);
@@ -91,8 +99,37 @@ export const Header: React.FC = () => {
             </div>
           </div>
 
-          {/* Right: Dark Mode toggle */}
-          <div className="flex items-center gap-3">
+          {/* Right: Staff Login / CMS Panel & Dark Mode toggle */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {currentRole === 'public' ? (
+              <button
+                onClick={() => setAdminLoginModalOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-amber-300 hover:text-amber-200 transition text-[11px] font-semibold cursor-pointer"
+                title="कर्मचारी तथा सम्पादक लगइन"
+              >
+                <Lock className="w-3 h-3 text-amber-400" />
+                <span>लगइन (Staff)</span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => navigateTo('admin')}
+                  className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-950 hover:bg-red-900 border border-red-800 text-amber-300 text-[11px] font-bold transition cursor-pointer"
+                  title="सम्पादकीय प्यानलमा जानुहोस्"
+                >
+                  <Shield className="w-3 h-3 text-red-400" />
+                  <span>CMS Panel</span>
+                </button>
+                <button
+                  onClick={logoutStaff}
+                  className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
+                  title="लगआउट गर्नुहोस्"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             <button
               onClick={toggleDarkMode}
               className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer flex items-center gap-1 text-[11px]"
@@ -102,12 +139,12 @@ export const Header: React.FC = () => {
               {isDarkMode ? (
                 <>
                   <Sun className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="hidden sm:inline">लाइट मोड</span>
+                  <span className="hidden sm:inline">लाइट</span>
                 </>
               ) : (
                 <>
                   <Moon className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">डार्क मोड</span>
+                  <span className="hidden sm:inline">डार्क</span>
                 </>
               )}
             </button>

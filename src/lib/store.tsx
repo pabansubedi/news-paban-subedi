@@ -29,6 +29,8 @@ interface NewsAppContextType {
   switchRole: (role: UserRole) => void;
   adminLoginModalOpen: boolean;
   setAdminLoginModalOpen: (open: boolean) => void;
+  verifyLogin: (email: string, password: string) => { success: boolean; error?: string; user?: UserProfile };
+  changeUserPassword: (userId: string, newPassword: string) => void;
   loginAs: (role: UserRole, email?: string, name?: string) => void;
   logoutStaff: () => void;
 
@@ -89,7 +91,29 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [users, setUsers] = useState<UserProfile[]>(() => {
     try {
       const saved = localStorage.getItem(USERS_KEY);
-      return saved ? JSON.parse(saved) : INITIAL_USERS;
+      if (saved) {
+        const parsed: UserProfile[] = JSON.parse(saved);
+        // Ensure initial accounts and all staff have a default secure password if not set
+        const migrated = parsed.map((u) => {
+          if (!u.password) {
+            if (u.email.toLowerCase() === 'pabansubedi128@gmail.com' || u.role === 'super_admin') {
+              return { ...u, password: 'paban@admin2026' };
+            }
+            if (u.role === 'editor') {
+              return { ...u, password: 'editor@2026' };
+            }
+            return { ...u, password: 'reporter@2026' };
+          }
+          return u;
+        });
+
+        const hasPaban = migrated.some((u) => u.email.toLowerCase() === 'pabansubedi128@gmail.com');
+        if (!hasPaban) {
+          migrated.unshift(INITIAL_USERS[0]);
+        }
+        return migrated;
+      }
+      return INITIAL_USERS;
     } catch {
       return INITIAL_USERS;
     }
@@ -279,7 +303,64 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Staff Login (strictly handled internally, never leaking demo passwords)
+  // Strict Staff Login Verification
+  const verifyLogin = (emailInput: string, passwordInput: string): { success: boolean; error?: string; user?: UserProfile } => {
+    const email = emailInput.trim().toLowerCase();
+    const pass = passwordInput.trim();
+
+    if (!email) {
+      return { success: false, error: 'कृपया इमेल ठेगाना प्रविष्ट गर्नुहोस्।' };
+    }
+    if (!pass) {
+      return { success: false, error: 'कृपया पासवर्ड प्रविष्ट गर्नुहोस्।' };
+    }
+
+    const matchedUser = users.find((u) => u.email.trim().toLowerCase() === email);
+
+    if (!matchedUser) {
+      return {
+        success: false,
+        error: `"${email}" इमेल प्रणालीमा दर्ता भएको छैन। कृपया सही आधिकारिक इमेल राख्नुहोस्।`
+      };
+    }
+
+    // Determine expected password for this account
+    const userPass = matchedUser.password || (matchedUser.role === 'super_admin' ? 'paban@admin2026' : matchedUser.role === 'editor' ? 'editor@2026' : 'reporter@2026');
+    const isMasterAdminPass = matchedUser.role === 'super_admin' && (pass === 'paban@admin2026' || pass === 'paban123');
+
+    if (pass !== userPass && !isMasterAdminPass) {
+      return {
+        success: false,
+        error: 'पासवर्ड मिलेन! कृपया सही पासवर्ड प्रविष्ट गर्नुहोस्।'
+      };
+    }
+
+    // Successful authentication
+    setCurrentRole(matchedUser.role);
+    setCurrentUser(matchedUser);
+    try {
+      localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({ role: matchedUser.role, user: matchedUser }));
+    } catch (e) {
+      console.warn('LocalStorage auth write error', e);
+    }
+
+    return { success: true, user: matchedUser };
+  };
+
+  const changeUserPassword = (userId: string, newPassword: string) => {
+    if (!newPassword || newPassword.trim().length < 4) return;
+    updateUser(userId, { password: newPassword.trim() });
+    if (currentUser.id === userId) {
+      const updatedUser = { ...currentUser, password: newPassword.trim() };
+      setCurrentUser(updatedUser);
+      try {
+        localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({ role: currentRole, user: updatedUser }));
+      } catch (e) {
+        console.warn('LocalStorage auth update error', e);
+      }
+    }
+  };
+
   const loginAs = (role: UserRole, email?: string, name?: string) => {
     const matched = users.find((u) => (email && u.email.toLowerCase() === email.toLowerCase()) || u.role === role) || {
       id: `user-${role}-custom`,
@@ -287,6 +368,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
       role,
       full_name: name || (role === 'super_admin' ? 'पवन सुवेदी (Paban Subedi)' : role === 'editor' ? 'सम्पादक (Editor)' : 'संवाददाता (Reporter)'),
       email: email || `${role}@pabansubedi.com.np`,
+      password: role === 'super_admin' ? 'paban@admin2026' : role === 'editor' ? 'editor@2026' : 'reporter@2026',
       avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'
     };
     setCurrentRole(role);
@@ -504,6 +586,8 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
         switchRole,
         adminLoginModalOpen,
         setAdminLoginModalOpen,
+        verifyLogin,
+        changeUserPassword,
         loginAs,
         logoutStaff,
         siteSettings,

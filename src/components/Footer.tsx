@@ -12,6 +12,7 @@ import {
   User,
   KeyRound,
   Eye,
+  EyeOff,
   Users,
   Activity,
   X,
@@ -20,7 +21,10 @@ import {
   Youtube,
   Shield,
   LogOut,
-  ExternalLink
+  ExternalLink,
+  AlertCircle,
+  CheckCircle2,
+  HelpCircle
 } from 'lucide-react';
 
 export const Footer: React.FC = () => {
@@ -32,63 +36,44 @@ export const Footer: React.FC = () => {
     onlineVisitors,
     currentRole,
     currentUser,
-    loginAs,
+    adminLoginModalOpen,
+    setAdminLoginModalOpen,
+    verifyLogin,
     logoutStaff
   } = useNewsApp();
 
-  const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showDemoAccounts, setShowDemoAccounts] = useState(false);
 
   const handleAdminLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
     setIsSubmitting(true);
 
-    const email = emailInput.trim().toLowerCase();
-    const pass = passwordInput.trim();
-
     setTimeout(() => {
       setIsSubmitting(false);
+      const res = verifyLogin(emailInput, passwordInput);
 
-      // Secure confidential verification (does not expose credentials on UI)
-      if (
-        email === 'pabansubedi128@gmail.com' ||
-        email.includes('paban') ||
-        email.includes('admin') ||
-        pass === 'admin' ||
-        pass === 'paban123' ||
-        pass === 'admin123'
-      ) {
-        loginAs('super_admin', email || 'pabansubedi128@gmail.com', 'पवन सुवेदी (Paban Subedi)');
-        setLoginModalOpen(false);
+      if (res.success) {
+        setAdminLoginModalOpen(false);
         setEmailInput('');
         setPasswordInput('');
-        navigateTo('admin');
-      } else if (email.includes('editor') || pass === 'editor123') {
-        loginAs('editor', email, 'सम्पादक (Editor)');
-        setLoginModalOpen(false);
-        setEmailInput('');
-        setPasswordInput('');
-        navigateTo('admin');
-      } else if (email.includes('reporter') || pass === 'reporter123') {
-        loginAs('reporter', email, 'संवाददाता (Reporter)');
-        setLoginModalOpen(false);
-        setEmailInput('');
-        setPasswordInput('');
-        navigateTo('admin');
-      } else if (pass.length >= 4) {
-        loginAs('super_admin', email || 'pabansubedi128@gmail.com', 'पवन सुवेदी (Paban Subedi)');
-        setLoginModalOpen(false);
-        setEmailInput('');
-        setPasswordInput('');
+        setLoginError('');
         navigateTo('admin');
       } else {
-        setLoginError('इमेल वा पासवर्ड मिलेन। कृपया सही विवरण प्रविष्ट गर्नुहोस्।');
+        setLoginError(res.error || 'इमेल वा पासवर्ड मिलेन। कृपया सही विवरण प्रविष्ट गर्नुहोस्।');
       }
-    }, 500);
+    }, 400);
+  };
+
+  const quickFill = (email: string, pass: string) => {
+    setEmailInput(email);
+    setPasswordInput(pass);
+    setLoginError('');
   };
 
   return (
@@ -260,7 +245,10 @@ export const Footer: React.FC = () => {
             <div className="pt-2">
               {currentRole === 'public' ? (
                 <button
-                  onClick={() => setLoginModalOpen(true)}
+                  onClick={() => {
+                    setLoginError('');
+                    setAdminLoginModalOpen(true);
+                  }}
                   className="w-full py-2 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition border border-slate-800 cursor-pointer"
                 >
                   <Lock className="w-3.5 h-3.5 text-slate-500" />
@@ -301,7 +289,10 @@ export const Footer: React.FC = () => {
           <div className="flex items-center gap-4">
             {currentRole === 'public' && (
               <button
-                onClick={() => setLoginModalOpen(true)}
+                onClick={() => {
+                  setLoginError('');
+                  setAdminLoginModalOpen(true);
+                }}
                 className="text-slate-500 hover:text-slate-400 text-[11px] transition cursor-pointer"
               >
                 Staff Access
@@ -315,11 +306,14 @@ export const Footer: React.FC = () => {
       </div>
 
       {/* CONFIDENTIAL SECURE ADMIN LOGIN MODAL */}
-      {loginModalOpen && (
+      {adminLoginModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative text-white">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative text-white max-h-[90vh] overflow-y-auto">
             <button
-              onClick={() => setLoginModalOpen(false)}
+              onClick={() => {
+                setAdminLoginModalOpen(false);
+                setLoginError('');
+              }}
               className="absolute top-4 right-4 p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
             >
               <X className="w-5 h-5" />
@@ -331,21 +325,24 @@ export const Footer: React.FC = () => {
               </div>
               <div>
                 <h3 className="font-extrabold text-base">सुरक्षित सम्पादकीय लगइन</h3>
-                <p className="text-[11px] text-slate-400">News Paban Subedi CMS</p>
+                <p className="text-[11px] text-slate-400">News Paban Subedi CMS Panel</p>
               </div>
             </div>
 
             <form onSubmit={handleAdminLoginSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">
-                  इमेल ठेगाना (Email Address)
+                  इमेल ठेगाना (Email Address) *
                 </label>
                 <div className="relative">
                   <input
                     type="email"
                     value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="staff@pabansubedi.com.np"
+                    onChange={(e) => {
+                      setEmailInput(e.target.value);
+                      if (loginError) setLoginError('');
+                    }}
+                    placeholder="pabansubedi128@gmail.com"
                     required
                     autoFocus
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-xs text-white outline-none focus:ring-2 focus:ring-red-600 placeholder:text-slate-500 font-medium"
@@ -356,24 +353,36 @@ export const Footer: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">
-                  गोप्य पासवर्ड / PIN
+                  गोप्य पासवर्ड (Password) *
                 </label>
                 <div className="relative">
                   <input
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     value={passwordInput}
-                    onChange={(e) => setPasswordInput(e.target.value)}
+                    onChange={(e) => {
+                      setPasswordInput(e.target.value);
+                      if (loginError) setLoginError('');
+                    }}
                     placeholder="••••••••••••"
                     required
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-xs text-white outline-none focus:ring-2 focus:ring-red-600 placeholder:text-slate-500 font-medium"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-10 py-2 text-xs text-white outline-none focus:ring-2 focus:ring-red-600 placeholder:text-slate-500 font-medium font-mono"
                   />
                   <KeyRound className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                    title={showPassword ? 'पासवर्ड लुकाउनुहोस्' : 'पासवर्ड देखाउनुहोस्'}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
                 </div>
               </div>
 
               {loginError && (
-                <div className="text-xs bg-rose-950/80 border border-rose-800 text-rose-300 p-2.5 rounded-lg text-center font-medium">
-                  {loginError}
+                <div className="text-xs bg-rose-950/90 border border-rose-800 text-rose-300 p-3 rounded-lg flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span className="font-semibold leading-relaxed">{loginError}</span>
                 </div>
               )}
 
@@ -383,13 +392,88 @@ export const Footer: React.FC = () => {
                 className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl transition shadow-md cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
               >
                 <Lock className="w-3.5 h-3.5" />
-                <span>{isSubmitting ? 'प्रमाणीकरण हुँदैछ...' : 'लगइन गर्नुहोस्'}</span>
+                <span>{isSubmitting ? 'प्रमाणीकरण हुँदैछ...' : 'सुरक्षित लगइन गर्नुहोस्'}</span>
+              </button>
+            </form>
+
+            {/* Quick Helper for initial default credentials */}
+            <div className="mt-5 pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowDemoAccounts(!showDemoAccounts)}
+                className="w-full flex items-center justify-between text-[11px] text-slate-400 hover:text-slate-300 font-medium py-1 cursor-pointer"
+              >
+                <span className="flex items-center gap-1.5 text-amber-400">
+                  <HelpCircle className="w-3.5 h-3.5" />
+                  <span>आधिकारिक खाता विवरण (Registered Staff Accounts)</span>
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  {showDemoAccounts ? 'लुकाउनुहोस् ▲' : 'हेर्नुहोस् ▼'}
+                </span>
               </button>
 
-              <p className="text-[10px] text-slate-500 text-center pt-2">
-                * केवल आधिकारिक सम्पादक तथा व्यवस्थापकहरूका लागि मात्र।
+              {showDemoAccounts && (
+                <div className="mt-3 space-y-2 bg-slate-950/70 p-3 rounded-xl border border-slate-800 text-[11px]">
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800">
+                    <div>
+                      <p className="font-bold text-white flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                        सुपर एडमिन (पवन सुवेदी)
+                      </p>
+                      <p className="text-slate-400 font-mono text-[10px]">pabansubedi128@gmail.com</p>
+                      <p className="text-amber-400 font-mono text-[10px]">पासवर्ड: paban@admin2026</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => quickFill('pabansubedi128@gmail.com', 'paban@admin2026')}
+                      className="px-2 py-1 bg-red-600/30 hover:bg-red-600 text-red-200 hover:text-white rounded text-[10px] font-bold transition cursor-pointer"
+                    >
+                      भरिदिनुहोस्
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800">
+                    <div>
+                      <p className="font-bold text-white flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                        समाचार सम्पादक (विक्रम थापा)
+                      </p>
+                      <p className="text-slate-400 font-mono text-[10px]">editor@pabansubedi.com.np</p>
+                      <p className="text-amber-400 font-mono text-[10px]">पासवर्ड: editor@2026</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => quickFill('editor@pabansubedi.com.np', 'editor@2026')}
+                      className="px-2 py-1 bg-blue-600/30 hover:bg-blue-600 text-blue-200 hover:text-white rounded text-[10px] font-bold transition cursor-pointer"
+                    >
+                      भरिदिनुहोस्
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800">
+                    <div>
+                      <p className="font-bold text-white flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                        संवाददाता (सुनिता शर्मा)
+                      </p>
+                      <p className="text-slate-400 font-mono text-[10px]">reporter@pabansubedi.com.np</p>
+                      <p className="text-amber-400 font-mono text-[10px]">पासवर्ड: reporter@2026</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => quickFill('reporter@pabansubedi.com.np', 'reporter@2026')}
+                      className="px-2 py-1 bg-amber-600/30 hover:bg-amber-600 text-amber-200 hover:text-white rounded text-[10px] font-bold transition cursor-pointer"
+                    >
+                      भरिदिनुहोस्
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-[10px] text-slate-500 text-center mt-3">
+                * गलत इमेल वा पासवर्ड हाल्दा प्रणालीले लगइन अस्वीकार गर्दछ। एडमिन प्यानलबाट नयाँ पासवर्ड फेर्न सकिन्छ।
               </p>
-            </form>
+            </div>
           </div>
         </div>
       )}

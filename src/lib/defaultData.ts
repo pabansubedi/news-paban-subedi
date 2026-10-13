@@ -7,6 +7,7 @@ export const INITIAL_USERS: UserProfile[] = [
     role: 'super_admin',
     full_name: 'पवन सुवेदी (Paban Subedi)',
     email: 'pabansubedi128@gmail.com',
+    password: 'paban@admin2026',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
     bio: 'प्रधान सम्पादक तथा संस्थापक, News Paban Subedi',
     phone: '+977-9800000000'
@@ -17,6 +18,7 @@ export const INITIAL_USERS: UserProfile[] = [
     role: 'editor',
     full_name: 'विक्रम थापा (Bikram Thapa)',
     email: 'editor@pabansubedi.com.np',
+    password: 'editor@2026',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
     bio: 'समाचार सम्पादक, राजनीतिक ब्युरो',
     phone: '+977-9811111111'
@@ -27,6 +29,7 @@ export const INITIAL_USERS: UserProfile[] = [
     role: 'reporter',
     full_name: 'सुनिता शर्मा (Sunita Sharma)',
     email: 'reporter@pabansubedi.com.np',
+    password: 'reporter@2026',
     avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80',
     bio: 'विशेष संवाददाता, अर्थ तथा समसामयिक मामिला',
     phone: '+977-9822222222'

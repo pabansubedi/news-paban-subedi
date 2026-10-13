@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNewsApp } from '../../lib/store';
-import { Post, PostStatus, AdPlacementSlot, Category } from '../../types';
+import { Post, PostStatus, AdPlacementSlot, Category, UserProfile } from '../../types';
 import { toNepaliDigits } from '../../lib/nepaliDate';
 import { SUPABASE_SQL_SCHEMA } from '../../lib/sqlSchema';
 import { NEXTJS_FOLDER_STRUCTURE, CODE_SNIPPETS } from '../../lib/nextjsStructure';
@@ -47,6 +47,7 @@ export const AdminDashboard: React.FC = () => {
     addUser,
     updateUser,
     deleteUser,
+    changeUserPassword,
     posts,
     addPost,
     updatePost,
@@ -69,10 +70,14 @@ export const AdminDashboard: React.FC = () => {
   // Staff Management state
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffEmail, setNewStaffEmail] = useState('');
+  const [newStaffPassword, setNewStaffPassword] = useState('');
   const [newStaffRole, setNewStaffRole] = useState<'super_admin' | 'editor' | 'reporter'>('editor');
   const [newStaffPhone, setNewStaffPhone] = useState('');
   const [newStaffBio, setNewStaffBio] = useState('');
   const [staffSuccessMsg, setStaffSuccessMsg] = useState('');
+  const [passwordModalUser, setPasswordModalUser] = useState<UserProfile | null>(null);
+  const [newPasswordVal, setNewPasswordVal] = useState('');
+  const [passwordSuccessMsg, setPasswordSuccessMsg] = useState('');
 
   // Filter for posts
   const [postFilter, setPostFilter] = useState<'all' | PostStatus>('all');
@@ -141,14 +146,20 @@ export const AdminDashboard: React.FC = () => {
 
   const handleAddStaff = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStaffName.trim() || !newStaffEmail.trim()) {
+    if (!newStaffName.trim() || !newStaffEmail.trim() || !newStaffPassword.trim()) {
+      alert('कृपया पूरा नाम, इमेल र पासवर्ड अनिवार्य भर्नुहोस्।');
+      return;
+    }
+    if (newStaffPassword.trim().length < 4) {
+      alert('पासवर्ड कम्तिमा ४ अक्षरको हुनुपर्छ।');
       return;
     }
     addUser({
       user_id: `usr_${Date.now()}`,
       role: newStaffRole,
       full_name: newStaffName.trim(),
-      email: newStaffEmail.trim(),
+      email: newStaffEmail.trim().toLowerCase(),
+      password: newStaffPassword.trim(),
       phone: newStaffPhone.trim() || undefined,
       bio: newStaffBio.trim() || undefined,
       avatar:
@@ -158,12 +169,29 @@ export const AdminDashboard: React.FC = () => {
           ? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80'
           : 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80'
     });
-    setStaffSuccessMsg(`नयाँ ${newStaffRole === 'super_admin' ? 'सुपर एडमिन' : newStaffRole === 'editor' ? 'सम्पादक' : 'संवाददाता'} सफलतापुर्वक थपियो!`);
+    setStaffSuccessMsg(`नयाँ ${newStaffRole === 'super_admin' ? 'सुपर एडमिन' : newStaffRole === 'editor' ? 'सम्पादक' : 'संवाददाता'} सफलतापुर्वक थपियो! (पासवर्ड: ${newStaffPassword.trim()})`);
     setNewStaffName('');
     setNewStaffEmail('');
+    setNewStaffPassword('');
     setNewStaffPhone('');
     setNewStaffBio('');
-    setTimeout(() => setStaffSuccessMsg(''), 4000);
+    setTimeout(() => setStaffSuccessMsg(''), 6000);
+  };
+
+  const handleSavePasswordChange = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passwordModalUser || !newPasswordVal.trim()) return;
+    if (newPasswordVal.trim().length < 4) {
+      alert('पासवर्ड कम्तिमा ४ अक्षरको हुनुपर्छ।');
+      return;
+    }
+    changeUserPassword(passwordModalUser.id, newPasswordVal.trim());
+    setPasswordSuccessMsg(`"${passwordModalUser.full_name}" को नयाँ पासवर्ड सफलतापुर्वक सुरक्षित गरियो!`);
+    setTimeout(() => {
+      setPasswordSuccessMsg('');
+      setPasswordModalUser(null);
+      setNewPasswordVal('');
+    }, 1500);
   };
 
   const handleSavePost = (submitStatus: PostStatus) => {
@@ -1260,6 +1288,21 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    गोप्य पासवर्ड (Login Password) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newStaffPassword}
+                    onChange={(e) => setNewStaffPassword(e.target.value)}
+                    placeholder="उदा: editor@2026"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-red-500 font-mono"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-0.5">कम्तिमा ४ अक्षरको गोप्य पासवर्ड राख्नुहोस्।</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     पद / भूमिका (Role) *
                   </label>
                   <select
@@ -1317,7 +1360,7 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                   <span>सक्रिय कर्मचारी तथा सम्पादक सूची ({toNepaliDigits(users.length)})</span>
                 </h4>
                 <span className="text-[11px] text-slate-500">
-                  एडमिनले सिधै रोल फेर्न सक्छन्
+                  एडमिनले सिधै रोल तथा पासवर्ड फेर्न सक्छन्
                 </span>
               </div>
 
@@ -1375,6 +1418,21 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                     </div>
 
                     <div className="flex items-center gap-2 w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-0 border-slate-100 dark:border-slate-800">
+                      {/* Password Reset Button */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPasswordModalUser(staff);
+                          setNewPasswordVal(staff.password || '');
+                          setPasswordSuccessMsg('');
+                        }}
+                        className="p-1.5 text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center gap-1 text-[11px] font-semibold cursor-pointer border border-slate-200 dark:border-slate-700"
+                        title="पासवर्ड फेर्नुहोस्"
+                      >
+                        <Key className="w-3.5 h-3.5 text-amber-500" />
+                        <span>पासवर्ड</span>
+                      </button>
+
                       {/* Change Role Dropdown */}
                       <select
                         value={staff.role}
@@ -1407,6 +1465,78 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
               </div>
             </div>
           </div>
+
+          {/* PASSWORD RESET MODAL */}
+          {passwordModalUser && (
+            <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl relative">
+                <button
+                  type="button"
+                  onClick={() => setPasswordModalUser(null)}
+                  className="absolute top-4 right-4 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded cursor-pointer"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-md">
+                    <Key className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                      पासवर्ड परिवर्तन
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      {passwordModalUser.full_name} ({passwordModalUser.email})
+                    </p>
+                  </div>
+                </div>
+
+                {passwordSuccessMsg && (
+                  <div className="mb-3 p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-semibold flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{passwordSuccessMsg}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleSavePasswordChange} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      नयाँ पासवर्ड (New Password) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={newPasswordVal}
+                      onChange={(e) => setNewPasswordVal(e.target.value)}
+                      placeholder="नयाँ पासवर्ड राख्नुहोस्..."
+                      autoFocus
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white font-mono outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      कम्तिमा ४ अक्षरको पासवर्ड हुनुपर्छ। लगइन गर्दा यही पासवर्ड प्रयोग गर्नुपर्छ।
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setPasswordModalUser(null)}
+                      className="flex-1 py-2 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                    >
+                      रद्द गर्नुहोस्
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 py-2 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer"
+                    >
+                      सुरक्षित गर्नुहोस्
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
