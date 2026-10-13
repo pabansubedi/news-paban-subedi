@@ -1,0 +1,555 @@
+import React, { useState, useEffect } from 'react';
+import { useNewsApp } from '../lib/store';
+import { AdBanner } from './AdBanner';
+import { toNepaliDigits, getNepaliDate } from '../lib/nepaliDate';
+import {
+  Volume2,
+  VolumeX,
+  Printer,
+  Share2,
+  Facebook,
+  Twitter,
+  MessageSquare,
+  Clock,
+  Eye,
+  User,
+  ArrowLeft,
+  Calendar,
+  Check,
+  Send,
+  Sparkles,
+  Bookmark,
+  Share,
+  Flame,
+  Copy
+} from 'lucide-react';
+
+interface ArticleDetailProps {
+  slug: string;
+}
+
+export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
+  const {
+    posts,
+    categories,
+    comments,
+    addComment,
+    incrementViews,
+    siteSettings,
+    navigateTo
+  } = useNewsApp();
+
+  const post = posts.find((p) => p.slug === slug);
+  const [copied, setCopied] = useState(false);
+  const [commentName, setCommentName] = useState('');
+  const [commentText, setCommentText] = useState('');
+  const [commentSuccess, setCommentSuccess] = useState(false);
+
+  // Audio / TTS state
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [speechRate, setSpeechRate] = useState<number>(1.0);
+
+  // Increment view count on mount
+  useEffect(() => {
+    if (post) {
+      incrementViews(post.id);
+    }
+  }, [post?.id]);
+
+  // Clean up audio on unmount
+  useEffect(() => {
+    return () => {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  // Automatic copy-paste attribution with portal URL
+  useEffect(() => {
+    const handleCopy = (e: ClipboardEvent) => {
+      const selection = window.getSelection();
+      if (!selection || selection.toString().trim().length === 0) return;
+      const selectedText = selection.toString();
+      const currentUrl = window.location.href;
+      const attribution = `\n\n--------------------------------------------\nस्रोत: News Paban Subedi (${currentUrl})\nप्रतिलिपि अधिकार © News Paban Subedi | सर्वाधिकार सुरक्षित।`;
+      e.clipboardData?.setData('text/plain', selectedText + attribution);
+      e.preventDefault();
+    };
+
+    document.addEventListener('copy', handleCopy);
+    return () => document.removeEventListener('copy', handleCopy);
+  }, []);
+
+  if (!post) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-16 text-center">
+        <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">
+          समाचार फेला परेन।
+        </h2>
+        <p className="text-slate-500 mt-2 text-sm">
+          तपाईंले खोज्नुभएको समाचार हटाइएको वा उपलब्ध नभएको हुन सक्छ।
+        </p>
+        <button
+          onClick={() => navigateTo('home')}
+          className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-bold"
+        >
+          गृहपृष्ठमा फर्कनुहोस्
+        </button>
+      </div>
+    );
+  }
+
+  const category = categories.find((c) => c.id === post.category_id);
+  const postComments = comments.filter((c) => c.post_id === post.id && c.is_approved);
+  const relatedPosts = posts
+    .filter((p) => p.status === 'published' && p.category_id === post.category_id && p.id !== post.id)
+    .slice(0, 3);
+
+  // Nepali Date
+  const publishDateObj = post.published_at ? new Date(post.published_at) : new Date(post.created_at);
+  const nepaliDate = getNepaliDate(publishDateObj);
+
+  // Text-To-Speech handler using Web Speech API
+  const handleToggleAudio = () => {
+    if (!('speechSynthesis' in window)) {
+      alert('माफ गर्नुहोस्, तपाईंको ब्राउजरमा Text-to-Speech समर्थित छैन।');
+      return;
+    }
+
+    if (isPlayingAudio) {
+      window.speechSynthesis.cancel();
+      setIsPlayingAudio(false);
+    } else {
+      window.speechSynthesis.cancel();
+      const textToRead = `${post.title}. ${post.content}`;
+      const utterance = new SpeechSynthesisUtterance(textToRead);
+      utterance.rate = speechRate;
+      utterance.lang = 'ne-NP';
+
+      utterance.onend = () => setIsPlayingAudio(false);
+      utterance.onerror = () => setIsPlayingAudio(false);
+
+      window.speechSynthesis.speak(utterance);
+      setIsPlayingAudio(true);
+    }
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(window.location.href);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  const handleNativeShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: post.title,
+          text: post.excerpt || post.title,
+          url: window.location.href,
+        });
+      } catch (err) {
+        console.log('Share canceled or not supported', err);
+      }
+    } else {
+      handleCopyLink();
+    }
+  };
+
+  const handleCommentSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!commentName.trim() || !commentText.trim()) return;
+    addComment(post.id, commentName.trim(), commentText.trim());
+    setCommentName('');
+    setCommentText('');
+    setCommentSuccess(true);
+    setTimeout(() => setCommentSuccess(false), 4000);
+  };
+
+  // Splitting content into paragraphs for in-article ad injection
+  const paragraphs = post.content.split('\n\n').filter((p) => p.trim());
+
+  return (
+    <article className="max-w-4xl mx-auto px-4 py-8 article-print-container">
+      {/* Back button & Category badge */}
+      <div className="flex items-center justify-between gap-4 mb-4 no-print">
+        <button
+          onClick={() => navigateTo('home')}
+          className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-red-600 transition"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>सबै समाचारमा फर्कनुहोस्</span>
+        </button>
+
+        {category && (
+          <button
+            onClick={() => navigateTo('category', category.slug)}
+            className="text-xs font-bold px-3 py-1 rounded-full text-white shadow-xs"
+            style={{ backgroundColor: category.color || '#dc2626' }}
+          >
+            {category.name}
+          </button>
+        )}
+      </div>
+
+      {/* Print-only Watermark & Header */}
+      <div className="hidden print-only mb-6 border-b-2 border-black pb-4 text-center">
+        <h1 className="text-2xl font-bold">{siteSettings.site_title}</h1>
+        <p className="text-xs">{siteSettings.subdomain} | {siteSettings.office_address}</p>
+        <p className="text-xs font-bold mt-1">प्रकाशित मिति: {nepaliDate.formattedNepali}</p>
+      </div>
+
+      {/* Title */}
+      <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-900 dark:text-white leading-tight tracking-tight">
+        {post.title}
+      </h1>
+
+      {/* Sub-header / Excerpt */}
+      {post.excerpt && (
+        <p className="text-lg sm:text-xl text-slate-600 dark:text-slate-300 font-medium mt-4 leading-relaxed border-l-4 border-red-600 pl-4 py-1 italic bg-red-50/40 dark:bg-red-950/20 rounded-r-lg">
+          {post.excerpt}
+        </p>
+      )}
+
+      {/* Author Byline & Date Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-4 py-4 my-6 border-y border-slate-200 dark:border-slate-800 text-xs sm:text-sm text-slate-600 dark:text-slate-400">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-600 to-rose-800 flex items-center justify-center text-white font-black text-xs shadow-xs border border-red-500">
+            NP
+          </div>
+          <div>
+            <div className="font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+              <span>News Paban Subedi</span>
+              <span className="text-[10px] bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-300 px-1.5 py-0.2 rounded font-bold">
+                आधिकारिक
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+              <span>सम्पादकीय डेस्क (News Desk)</span>
+              <span>•</span>
+              <span>news.pabansubedi.com.np</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4 text-xs">
+          <span className="flex items-center gap-1.5 font-medium">
+            <Calendar className="w-4 h-4 text-red-600" />
+            {nepaliDate.formattedNepali}
+          </span>
+          <span className="flex items-center gap-1.5 font-medium">
+            <Eye className="w-4 h-4 text-blue-600" />
+            {toNepaliDigits(post.views)} भ्युज
+          </span>
+          <span className="flex items-center gap-1.5 font-medium">
+            <Clock className="w-4 h-4 text-amber-600" />
+            {toNepaliDigits(post.read_time_mins || 3)} मिनेट पढ्ने समय
+          </span>
+        </div>
+      </div>
+
+      {/* AUDIO / TEXT-TO-SPEECH PLAYER BAR */}
+      <div className="no-print mb-6 p-4 rounded-xl bg-gradient-to-r from-red-50 to-amber-50 dark:from-slate-900 dark:to-slate-800 border border-red-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-4 shadow-xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleToggleAudio}
+            className={`w-11 h-11 rounded-full flex items-center justify-center font-bold text-white shadow-md transition-transform hover:scale-105 cursor-pointer ${
+              isPlayingAudio ? 'bg-amber-600 animate-pulse' : 'bg-red-600 hover:bg-red-700'
+            }`}
+            title="समाचार सुन्नुहोस्"
+          >
+            {isPlayingAudio ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+          </button>
+          <div>
+            <div className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+              <span>समाचार सुन्नुहोस् (Listen to Audio News)</span>
+              {isPlayingAudio && (
+                <span className="text-[10px] bg-red-600 text-white px-2 py-0.2 rounded-full font-bold">
+                  बज्दैछ...
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              नेपाली आवाजमा समाचार सुन्न अडियो प्लेयर प्रयोग गर्नुहोस्।
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500">गति:</span>
+          {[0.8, 1.0, 1.2].map((rate) => (
+            <button
+              key={rate}
+              onClick={() => setSpeechRate(rate)}
+              className={`px-2 py-1 rounded text-xs font-semibold ${
+                speechRate === rate
+                  ? 'bg-red-600 text-white'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              {rate}x
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Featured Image & Caption */}
+      <figure className="mb-8">
+        <div className="relative rounded-2xl overflow-hidden aspect-[16/10] bg-slate-100 dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-800">
+          <img
+            src={post.featured_image}
+            alt={post.title}
+            className="w-full h-full object-cover"
+          />
+          {post.is_breaking && (
+            <div className="absolute top-4 left-4 bg-red-600 text-white text-xs font-extrabold px-3 py-1 rounded-md shadow flex items-center gap-1">
+              <Flame className="w-3.5 h-3.5" />
+              <span>ताजा ब्रेकिङ</span>
+            </div>
+          )}
+        </div>
+        {post.image_caption && (
+          <figcaption className="text-xs text-slate-500 dark:text-slate-400 mt-2 text-center italic">
+            तस्बिर: {post.image_caption}
+          </figcaption>
+        )}
+      </figure>
+
+      {/* Action Buttons: Full Social Share Suite, Print, Copy */}
+      <div className="flex flex-wrap items-center justify-between gap-3 py-3 px-4 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-800 mb-8 no-print">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <span className="text-xs font-bold text-slate-700 dark:text-slate-300 mr-1 flex items-center gap-1">
+            <Share2 className="w-3.5 h-3.5 text-red-600" />
+            <span>सेयर गर्नुहोस्:</span>
+          </span>
+
+          {/* Facebook */}
+          <button
+            onClick={() => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}`, '_blank')}
+            className="px-2.5 py-1.5 rounded-lg bg-[#1877F2] hover:bg-[#166fe5] text-white transition text-xs flex items-center gap-1 font-semibold cursor-pointer shadow-2xs"
+            title="Facebook मा सेयर गर्नुहोस्"
+          >
+            <Facebook className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">फेसबुक</span>
+          </button>
+
+          {/* Twitter / X */}
+          <button
+            onClick={() => window.open(`https://twitter.com/intent/tweet?url=${encodeURIComponent(window.location.href)}&text=${encodeURIComponent(post.title)}`, '_blank')}
+            className="px-2.5 py-1.5 rounded-lg bg-black hover:bg-slate-800 text-white transition text-xs flex items-center gap-1 font-semibold cursor-pointer shadow-2xs"
+            title="Twitter / X मा सेयर गर्नुहोस्"
+          >
+            <Twitter className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">ट्विटर</span>
+          </button>
+
+          {/* WhatsApp */}
+          <button
+            onClick={() => window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(post.title + ' ' + window.location.href)}`, '_blank')}
+            className="px-2.5 py-1.5 rounded-lg bg-[#25D366] hover:bg-[#20ba59] text-white transition text-xs flex items-center gap-1 font-semibold cursor-pointer shadow-2xs"
+            title="WhatsApp मा सेयर गर्नुहोस्"
+          >
+            <span className="font-bold">WA</span>
+            <span className="hidden sm:inline">ह्वाट्सएप</span>
+          </button>
+
+          {/* Viber */}
+          <button
+            onClick={() => window.open(`viber://forward?text=${encodeURIComponent(post.title + ' ' + window.location.href)}`, '_blank')}
+            className="px-2.5 py-1.5 rounded-lg bg-[#7360F2] hover:bg-[#6652e6] text-white transition text-xs flex items-center gap-1 font-semibold cursor-pointer shadow-2xs"
+            title="Viber मा सेयर गर्नुहोस्"
+          >
+            <span className="font-bold">V</span>
+            <span className="hidden sm:inline">भाइबर</span>
+          </button>
+
+          {/* Telegram */}
+          <button
+            onClick={() => window.open(`https://t.me/share/url?url=${encodeURIComponent(window.location.href)}&text=${encodeURIComponent(post.title)}`, '_blank')}
+            className="px-2.5 py-1.5 rounded-lg bg-[#229ED9] hover:bg-[#1f8ec4] text-white transition text-xs flex items-center gap-1 font-semibold cursor-pointer shadow-2xs"
+            title="Telegram मा सेयर गर्नुहोस्"
+          >
+            <Send className="w-3 h-3" />
+            <span className="hidden sm:inline">टेलिग्राम</span>
+          </button>
+
+          {/* Native Mobile Share / More */}
+          <button
+            onClick={handleNativeShare}
+            className="px-2.5 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 transition text-xs flex items-center gap-1 font-semibold cursor-pointer"
+            title="अन्य माध्यमबाट सेयर गर्नुहोस्"
+          >
+            <Share className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300" />
+            <span className="hidden sm:inline">थप</span>
+          </button>
+
+          {/* Copy Link */}
+          <button
+            onClick={handleCopyLink}
+            className="px-2.5 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 transition text-xs flex items-center gap-1 font-semibold cursor-pointer"
+          >
+            {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copied ? 'लिंक कपि भयो!' : 'लिंक'}</span>
+          </button>
+        </div>
+
+        {/* Print Article & PDF Button */}
+        <button
+          onClick={handlePrint}
+          className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs transition shadow-sm cursor-pointer ml-auto"
+        >
+          <Printer className="w-4 h-4" />
+          <span>प्रिन्ट / PDF</span>
+        </button>
+      </div>
+
+      {/* ARTICLE BODY PARAGRAPHS WITH IN-ARTICLE AD INJECTION */}
+      <div className="prose prose-lg dark:prose-invert max-w-none space-y-6 text-slate-800 dark:text-slate-200 text-lg leading-relaxed font-normal">
+        {paragraphs.map((para, index) => (
+          <React.Fragment key={index}>
+            <p className="leading-relaxed">{para}</p>
+            {/* Ad Location 4: Inside Article Detail Page (Between paragraphs, after 2nd paragraph) */}
+            {index === 1 && (
+              <div className="no-print">
+                <AdBanner slot="in_article" />
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* Tags */}
+      {post.tags && post.tags.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mt-8 pt-6 border-t border-slate-200 dark:border-slate-800 no-print">
+          <span className="text-xs font-bold text-slate-500">ट्यागहरू:</span>
+          {post.tags.map((tag, idx) => (
+            <span
+              key={idx}
+              className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-3 py-1 rounded-md border border-slate-200 dark:border-slate-700"
+            >
+              #{tag}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Print Footer Watermark */}
+      <div className="hidden print-only mt-12 pt-6 border-t border-slate-400 text-xs text-center">
+        <p>प्रतिलिपि अधिकार © {siteSettings.site_title}. {siteSettings.subdomain}</p>
+        <p>यो समाचार अनलाइन पोर्टलबाट प्रिन्ट गरिएको हो।</p>
+      </div>
+
+      {/* COMMENTS SECTION */}
+      <section className="mt-12 pt-8 border-t border-slate-200 dark:border-slate-800 no-print">
+        <div className="flex items-center gap-2 mb-6">
+          <MessageSquare className="w-5 h-5 text-red-600" />
+          <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+            प्रतिक्रियाहरू ({toNepaliDigits(postComments.length)})
+          </h3>
+        </div>
+
+        {/* Comment form */}
+        <form onSubmit={handleCommentSubmit} className="mb-8 p-5 bg-slate-100 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 space-y-4">
+          <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+            तपाईंको विचार व्यक्त गर्नुहोस् (Add Comment)
+          </h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <input
+              type="text"
+              value={commentName}
+              onChange={(e) => setCommentName(e.target.value)}
+              placeholder="तपाईंको पूरा नाम *"
+              required
+              className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-red-600"
+            />
+          </div>
+          <textarea
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            placeholder="आफ्नो मर्यादित टिप्पणी यहाँ लेख्नुहोस्..."
+            rows={3}
+            required
+            className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-red-600"
+          ></textarea>
+
+          <div className="flex items-center justify-between">
+            <button
+              type="submit"
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>प्रतिक्रिया पठाउनुहोस्</span>
+            </button>
+            {commentSuccess && (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold">
+                ✓ तपाईंको प्रतिक्रिया सफलतापूर्वक दर्ता भयो!
+              </span>
+            )}
+          </div>
+        </form>
+
+        {/* Existing comments list */}
+        <div className="space-y-4">
+          {postComments.length === 0 ? (
+            <p className="text-xs text-slate-500 italic">पहिलो प्रतिक्रिया लेख्ने व्यक्ति बन्नुहोस्।</p>
+          ) : (
+            postComments.map((c) => (
+              <div
+                key={c.id}
+                className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs"
+              >
+                <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
+                  <strong className="text-slate-900 dark:text-white font-bold">{c.author_name}</strong>
+                  <span>{new Date(c.created_at).toLocaleDateString('ne-NP')}</span>
+                </div>
+                <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
+                  {c.content}
+                </p>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      {/* RELATED NEWS */}
+      {relatedPosts.length > 0 && (
+        <section className="mt-12 pt-8 border-t border-slate-200 dark:border-slate-800 no-print">
+          <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-red-600" />
+            <span>सम्बन्धित समाचार (Related News)</span>
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {relatedPosts.map((rel) => (
+              <div
+                key={rel.id}
+                onClick={() => navigateTo('article', rel.slug)}
+                className="cursor-pointer group bg-white dark:bg-slate-900 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 hover:shadow-md transition"
+              >
+                <div className="aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
+                  <img
+                    src={rel.featured_image}
+                    alt={rel.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition"
+                  />
+                </div>
+                <div className="p-3">
+                  <h4 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-2 group-hover:text-red-600 transition">
+                    {rel.title}
+                  </h4>
+                  <span className="text-[11px] text-slate-400 mt-2 block">
+                    {toNepaliDigits(rel.views)} पटक पढिएको
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </article>
+  );
+};

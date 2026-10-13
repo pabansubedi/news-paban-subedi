@@ -1,0 +1,6 @@
+{
+  "name": "Nepal Khabar 24 - news.pabansubedi.com.np",
+  "description": "Production-ready Nepali news portal featuring editorial approval workflow, dynamic ad engine, Bikram Sambat calendar, audio news reader, and complete Supabase schema.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
