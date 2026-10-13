@@ -257,13 +257,22 @@ CREATE INDEX IF NOT EXISTS idx_comments_post ON public.comments(post_id, is_appr
 -- 9. HELPER FUNCTIONS & TRIGGERS
 -- ------------------------------------------------------------------------------
 
+-- Safely drop existing functions to allow altering return types or signatures
+DROP FUNCTION IF EXISTS public.get_auth_role() CASCADE;
+DROP FUNCTION IF EXISTS public.increment_post_views(TEXT) CASCADE;
+DROP FUNCTION IF EXISTS public.increment_ad_clicks(UUID) CASCADE;
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users CASCADE;
+DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
+DROP TRIGGER IF EXISTS set_posts_updated_at ON public.posts CASCADE;
+DROP FUNCTION IF EXISTS public.set_updated_at() CASCADE;
+
 -- Function to check current user role from auth.uid()
 CREATE OR REPLACE FUNCTION public.get_auth_role()
-RETURNS user_role_type AS $$
+RETURNS TEXT AS $$
 DECLARE
-    v_role user_role_type;
+    v_role TEXT;
 BEGIN
-    SELECT role INTO v_role FROM public.users_profile WHERE user_id = auth.uid();
+    SELECT role::TEXT INTO v_role FROM public.users_profile WHERE user_id = auth.uid();
     RETURN v_role;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
@@ -299,12 +308,22 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- Trigger to auto-create user profile when a new user signs up in auth.users
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+    assigned_role user_role_type := 'reporter';
 BEGIN
+    BEGIN
+        IF new.raw_user_meta_data->>'role' IS NOT NULL THEN
+            assigned_role := (new.raw_user_meta_data->>'role')::user_role_type;
+        END IF;
+    EXCEPTION WHEN OTHERS THEN
+        assigned_role := 'reporter';
+    END;
+
     INSERT INTO public.users_profile (user_id, full_name, role, avatar)
     VALUES (
         new.id,
         COALESCE(new.raw_user_meta_data->>'full_name', new.email),
-        COALESCE((new.raw_user_meta_data->>'role')::user_role_type, 'reporter'),
+        assigned_role,
         new.raw_user_meta_data->>'avatar_url'
     )
     ON CONFLICT (user_id) DO NOTHING;
@@ -312,7 +331,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
 AFTER INSERT ON auth.users
 FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
@@ -326,7 +344,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS set_posts_updated_at ON public.posts;
 CREATE TRIGGER set_posts_updated_at
 BEFORE UPDATE ON public.posts
 FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
