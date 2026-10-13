@@ -13,6 +13,7 @@ import {
   Trash2,
   Edit,
   Eye,
+  EyeOff,
   Sliders,
   Megaphone,
   Layers,
@@ -74,9 +75,11 @@ export const AdminDashboard: React.FC = () => {
   const [newStaffRole, setNewStaffRole] = useState<'super_admin' | 'editor' | 'reporter'>('editor');
   const [newStaffPhone, setNewStaffPhone] = useState('');
   const [newStaffBio, setNewStaffBio] = useState('');
+  const [showNewStaffPassword, setShowNewStaffPassword] = useState(false);
   const [staffSuccessMsg, setStaffSuccessMsg] = useState('');
   const [passwordModalUser, setPasswordModalUser] = useState<UserProfile | null>(null);
   const [newPasswordVal, setNewPasswordVal] = useState('');
+  const [showModalPassword, setShowModalPassword] = useState(false);
   const [passwordSuccessMsg, setPasswordSuccessMsg] = useState('');
 
   // Filter for posts
@@ -169,13 +172,13 @@ export const AdminDashboard: React.FC = () => {
           ? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80'
           : 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80'
     });
-    setStaffSuccessMsg(`नयाँ ${newStaffRole === 'super_admin' ? 'सुपर एडमिन' : newStaffRole === 'editor' ? 'सम्पादक' : 'संवाददाता'} सफलतापुर्वक थपियो! (पासवर्ड: ${newStaffPassword.trim()})`);
+    setStaffSuccessMsg(`नयाँ ${newStaffRole === 'super_admin' ? 'सुपर एडमिन' : newStaffRole === 'editor' ? 'सम्पादक' : 'संवाददाता'} (${newStaffEmail.trim()}) सफलतापुर्वक दर्ता गरियो!`);
     setNewStaffName('');
     setNewStaffEmail('');
     setNewStaffPassword('');
     setNewStaffPhone('');
     setNewStaffBio('');
-    setTimeout(() => setStaffSuccessMsg(''), 6000);
+    setTimeout(() => setStaffSuccessMsg(''), 5000);
   };
 
   const handleSavePasswordChange = (e: React.FormEvent) => {
@@ -1290,14 +1293,23 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     गोप्य पासवर्ड (Login Password) *
                   </label>
-                  <input
-                    type="text"
-                    required
-                    value={newStaffPassword}
-                    onChange={(e) => setNewStaffPassword(e.target.value)}
-                    placeholder="उदा: editor@2026"
-                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-red-500 font-mono"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showNewStaffPassword ? 'text' : 'password'}
+                      required
+                      value={newStaffPassword}
+                      onChange={(e) => setNewStaffPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg pl-3 pr-10 py-2 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-red-500 font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewStaffPassword(!showNewStaffPassword)}
+                      className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                    >
+                      {showNewStaffPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                   <p className="text-[10px] text-slate-500 mt-0.5">कम्तिमा ४ अक्षरको गोप्य पासवर्ड राख्नुहोस्।</p>
                 </div>
 
@@ -1423,7 +1435,7 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                         type="button"
                         onClick={() => {
                           setPasswordModalUser(staff);
-                          setNewPasswordVal(staff.password || '');
+                          setNewPasswordVal('');
                           setPasswordSuccessMsg('');
                         }}
                         className="p-1.5 text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center gap-1 text-[11px] font-semibold cursor-pointer border border-slate-200 dark:border-slate-700"
@@ -1504,15 +1516,24 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                       नयाँ पासवर्ड (New Password) *
                     </label>
-                    <input
-                      type="text"
-                      required
-                      value={newPasswordVal}
-                      onChange={(e) => setNewPasswordVal(e.target.value)}
-                      placeholder="नयाँ पासवर्ड राख्नुहोस्..."
-                      autoFocus
-                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white font-mono outline-none focus:ring-2 focus:ring-amber-500"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showModalPassword ? 'text' : 'password'}
+                        required
+                        value={newPasswordVal}
+                        onChange={(e) => setNewPasswordVal(e.target.value)}
+                        placeholder="नयाँ पासवर्ड राख्नुहोस्..."
+                        autoFocus
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg pl-3 pr-10 py-2 text-xs text-slate-900 dark:text-white font-mono outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowModalPassword(!showModalPassword)}
+                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                      >
+                        {showModalPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                     <p className="text-[10px] text-slate-500 mt-1">
                       कम्तिमा ४ अक्षरको पासवर्ड हुनुपर्छ। लगइन गर्दा यही पासवर्ड प्रयोग गर्नुपर्छ।
                     </p>

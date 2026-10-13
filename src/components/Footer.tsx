@@ -23,8 +23,7 @@ import {
   LogOut,
   ExternalLink,
   AlertCircle,
-  CheckCircle2,
-  HelpCircle
+  CheckCircle2
 } from 'lucide-react';
 
 export const Footer: React.FC = () => {
@@ -47,7 +46,6 @@ export const Footer: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showDemoAccounts, setShowDemoAccounts] = useState(false);
 
   const handleAdminLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,12 +66,6 @@ export const Footer: React.FC = () => {
         setLoginError(res.error || 'इमेल वा पासवर्ड मिलेन। कृपया सही विवरण प्रविष्ट गर्नुहोस्।');
       }
     }, 400);
-  };
-
-  const quickFill = (email: string, pass: string) => {
-    setEmailInput(email);
-    setPasswordInput(pass);
-    setLoginError('');
   };
 
   return (
@@ -342,7 +334,7 @@ export const Footer: React.FC = () => {
                       setEmailInput(e.target.value);
                       if (loginError) setLoginError('');
                     }}
-                    placeholder="pabansubedi128@gmail.com"
+                    placeholder="तपाईंको आधिकारिक इमेल (उदा: admin@news.com)"
                     required
                     autoFocus
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-xs text-white outline-none focus:ring-2 focus:ring-red-600 placeholder:text-slate-500 font-medium"
@@ -396,82 +388,10 @@ export const Footer: React.FC = () => {
               </button>
             </form>
 
-            {/* Quick Helper for initial default credentials */}
-            <div className="mt-5 pt-4 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setShowDemoAccounts(!showDemoAccounts)}
-                className="w-full flex items-center justify-between text-[11px] text-slate-400 hover:text-slate-300 font-medium py-1 cursor-pointer"
-              >
-                <span className="flex items-center gap-1.5 text-amber-400">
-                  <HelpCircle className="w-3.5 h-3.5" />
-                  <span>आधिकारिक खाता विवरण (Registered Staff Accounts)</span>
-                </span>
-                <span className="text-[10px] text-slate-500">
-                  {showDemoAccounts ? 'लुकाउनुहोस् ▲' : 'हेर्नुहोस् ▼'}
-                </span>
-              </button>
-
-              {showDemoAccounts && (
-                <div className="mt-3 space-y-2 bg-slate-950/70 p-3 rounded-xl border border-slate-800 text-[11px]">
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800">
-                    <div>
-                      <p className="font-bold text-white flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                        सुपर एडमिन (पवन सुवेदी)
-                      </p>
-                      <p className="text-slate-400 font-mono text-[10px]">pabansubedi128@gmail.com</p>
-                      <p className="text-amber-400 font-mono text-[10px]">पासवर्ड: paban@admin2026</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => quickFill('pabansubedi128@gmail.com', 'paban@admin2026')}
-                      className="px-2 py-1 bg-red-600/30 hover:bg-red-600 text-red-200 hover:text-white rounded text-[10px] font-bold transition cursor-pointer"
-                    >
-                      भरिदिनुहोस्
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800">
-                    <div>
-                      <p className="font-bold text-white flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                        समाचार सम्पादक (विक्रम थापा)
-                      </p>
-                      <p className="text-slate-400 font-mono text-[10px]">editor@pabansubedi.com.np</p>
-                      <p className="text-amber-400 font-mono text-[10px]">पासवर्ड: editor@2026</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => quickFill('editor@pabansubedi.com.np', 'editor@2026')}
-                      className="px-2 py-1 bg-blue-600/30 hover:bg-blue-600 text-blue-200 hover:text-white rounded text-[10px] font-bold transition cursor-pointer"
-                    >
-                      भरिदिनुहोस्
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800">
-                    <div>
-                      <p className="font-bold text-white flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                        संवाददाता (सुनिता शर्मा)
-                      </p>
-                      <p className="text-slate-400 font-mono text-[10px]">reporter@pabansubedi.com.np</p>
-                      <p className="text-amber-400 font-mono text-[10px]">पासवर्ड: reporter@2026</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => quickFill('reporter@pabansubedi.com.np', 'reporter@2026')}
-                      className="px-2 py-1 bg-amber-600/30 hover:bg-amber-600 text-amber-200 hover:text-white rounded text-[10px] font-bold transition cursor-pointer"
-                    >
-                      भरिदिनुहोस्
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <p className="text-[10px] text-slate-500 text-center mt-3">
-                * गलत इमेल वा पासवर्ड हाल्दा प्रणालीले लगइन अस्वीकार गर्दछ। एडमिन प्यानलबाट नयाँ पासवर्ड फेर्न सकिन्छ।
+            <div className="mt-4 pt-3 border-t border-slate-800/80 text-center">
+              <p className="text-[11px] text-slate-400 flex items-center justify-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-slate-500" />
+                <span>यो लगइन केवल अधिकृत सम्पादक र पत्रकारहरूका लागि मात्र हो।</span>
               </p>
             </div>
           </div>
