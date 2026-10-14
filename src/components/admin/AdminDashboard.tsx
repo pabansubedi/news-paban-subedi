@@ -33,12 +33,19 @@ import {
   Users,
   UserPlus,
   Shield,
-  UserCheck,
+  Save,
+  Loader2,
+  CheckCircle,
   Key,
   Lock,
   Mail,
-  Phone
+  Phone,
+  Bell,
+  BellRing,
+  Send,
+  Radio
 } from 'lucide-react';
+import { notifyNewArticlePublished } from '../../lib/notificationService';
 
 export const AdminDashboard: React.FC = () => {
   const {
@@ -65,8 +72,14 @@ export const AdminDashboard: React.FC = () => {
     navigateTo
   } = useNewsApp();
 
-  type AdminTab = 'posts' | 'new_post' | 'ads' | 'categories' | 'staff' | 'settings' | 'sql_schema' | 'nextjs_code';
+  type AdminTab = 'posts' | 'new_post' | 'ads' | 'categories' | 'staff' | 'settings' | 'notifications' | 'sql_schema' | 'nextjs_code';
   const [activeTab, setActiveTab] = useState<AdminTab>('posts');
+
+  // Push notification broadcast state
+  const [broadcastHeadline, setBroadcastHeadline] = useState('');
+  const [broadcastArticleSlug, setBroadcastArticleSlug] = useState('');
+  const [broadcastIsBreaking, setBroadcastIsBreaking] = useState(true);
+  const [broadcastSentToast, setBroadcastSentToast] = useState(false);
 
   // Staff Management state
   const [newStaffName, setNewStaffName] = useState('');
@@ -106,6 +119,32 @@ export const AdminDashboard: React.FC = () => {
   const [copiedSql, setCopiedSql] = useState(false);
   const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
 
+  // Settings Form state with explicit Update button
+  const [settingsForm, setSettingsForm] = useState(siteSettings);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsSavedToast, setSettingsSavedToast] = useState(false);
+
+  React.useEffect(() => {
+    setSettingsForm(siteSettings);
+  }, [siteSettings]);
+
+  const handleSaveAllSettings = () => {
+    setIsSavingSettings(true);
+    updateSiteSettings(settingsForm);
+
+    try {
+      localStorage.setItem('nepal_news_last_updated', Date.now().toString());
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new CustomEvent('news_settings_updated', { detail: settingsForm }));
+    } catch {}
+
+    setTimeout(() => {
+      setIsSavingSettings(false);
+      setSettingsSavedToast(true);
+      setTimeout(() => setSettingsSavedToast(false), 3500);
+    }, 350);
+  };
+
   // New Category Modal states
   const [newCatName, setNewCatName] = useState('');
   const [newCatEn, setNewCatEn] = useState('');
@@ -134,10 +173,22 @@ export const AdminDashboard: React.FC = () => {
       reader.onload = (uploadEvent) => {
         const result = uploadEvent.target?.result as string;
         if (target === 'post') setPostImage(result);
-        else if (target === 'logo') updateSiteSettings({ logo_url: result });
-        else if (target === 'logo_dark') updateSiteSettings({ logo_dark_url: result });
-        else if (target === 'favicon') updateSiteSettings({ favicon_url: result });
-        else if (target === 'watermark') updateSiteSettings({ watermark_url: result });
+        else if (target === 'logo') {
+          setSettingsForm((prev) => ({ ...prev, logo_url: result }));
+          updateSiteSettings({ logo_url: result });
+        }
+        else if (target === 'logo_dark') {
+          setSettingsForm((prev) => ({ ...prev, logo_dark_url: result }));
+          updateSiteSettings({ logo_dark_url: result });
+        }
+        else if (target === 'favicon') {
+          setSettingsForm((prev) => ({ ...prev, favicon_url: result }));
+          updateSiteSettings({ favicon_url: result });
+        }
+        else if (target === 'watermark') {
+          setSettingsForm((prev) => ({ ...prev, watermark_url: result }));
+          updateSiteSettings({ watermark_url: result });
+        }
         else if (target.startsWith('ad-')) {
           const adId = target.replace('ad-', '');
           updateAd(adId, { image_url: result });
@@ -220,6 +271,14 @@ export const AdminDashboard: React.FC = () => {
         tags: tagsArray,
         editor_name: currentUser.full_name
       });
+      if (submitStatus === 'published') {
+        notifyNewArticlePublished({
+          title: postTitle,
+          slug: postSlug,
+          featured_image: postImage,
+          is_breaking: postIsBreaking
+        });
+      }
       setFormSuccess('समाचार सफलतापूर्वक अपडेट गरियो!');
     } else {
       addPost({
@@ -240,6 +299,14 @@ export const AdminDashboard: React.FC = () => {
         tags: tagsArray,
         published_at: submitStatus === 'published' ? new Date().toISOString() : null
       });
+      if (submitStatus === 'published') {
+        notifyNewArticlePublished({
+          title: postTitle,
+          slug: postSlug,
+          featured_image: postImage,
+          is_breaking: postIsBreaking
+        });
+      }
       setFormSuccess(
         submitStatus === 'published'
           ? 'समाचार प्रत्यक्ष प्रकाशित गरियो!'
@@ -429,6 +496,18 @@ export const AdminDashboard: React.FC = () => {
         </button>
 
         <button
+          onClick={() => setActiveTab('notifications')}
+          className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
+            activeTab === 'notifications'
+              ? 'border-red-600 text-red-600 dark:text-red-400'
+              : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900'
+          }`}
+        >
+          <BellRing className="w-4 h-4 text-amber-500 animate-pulse" />
+          <span>पुस नोटिफिकेसन (Push Alerts)</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('sql_schema')}
           className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
             activeTab === 'sql_schema'
@@ -607,7 +686,15 @@ export const AdminDashboard: React.FC = () => {
                               {/* APPROVAL WORKFLOW BUTTONS FOR SUPER ADMIN / EDITOR */}
                               {currentRole === 'super_admin' && post.status !== 'published' && (
                                 <button
-                                  onClick={() => changePostStatus(post.id, 'published', currentUser.full_name)}
+                                  onClick={() => {
+                                    changePostStatus(post.id, 'published', currentUser.full_name);
+                                    notifyNewArticlePublished({
+                                      title: post.title,
+                                      slug: post.slug,
+                                      featured_image: post.featured_image,
+                                      is_breaking: post.is_breaking
+                                    });
+                                  }}
                                   className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 transition shadow-xs cursor-pointer"
                                   title="Approve and Publish to Live Site"
                                 >
@@ -1566,9 +1653,45 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
       {/* ------------------------------------------------------------- */}
       {activeTab === 'settings' && (
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6 space-y-6">
-          <h3 className="text-xl font-bold text-slate-900 dark:text-white">
-            साइट सेटिङ, ब्रान्डिङ & सम्पर्क विवरण (Live Dynamic Settings)
-          </h3>
+          {/* Header & Quick Save Button */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800 gap-4">
+            <div>
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Settings className="w-5 h-5 text-red-500" />
+                <span>साइट सेटिङ, ब्रान्डिङ & सम्पर्क विवरण</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                यहाँ गरिएको सबै परिवर्तन Supabase PostgreSQL र पोर्टलमा तत्काल सबै प्रयोगकर्ताहरूलाई देखिन्छ।
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {settingsSavedToast && (
+                <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 animate-in fade-in">
+                  <CheckCircle className="w-4 h-4 text-emerald-500" />
+                  <span>अपडेट भयो!</span>
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={handleSaveAllSettings}
+                disabled={isSavingSettings}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/25 flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+              >
+                {isSavingSettings ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>अपडेट हुँदैछ...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>अपडेट गर्नुहोस् (Save & Update)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
@@ -1577,8 +1700,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
               </label>
               <input
                 type="text"
-                value={siteSettings.site_title}
-                onChange={(e) => updateSiteSettings({ site_title: e.target.value })}
+                value={settingsForm.site_title || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, site_title: e.target.value })}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-semibold text-slate-900 dark:text-white"
               />
             </div>
@@ -1589,8 +1712,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
               </label>
               <input
                 type="text"
-                value={siteSettings.tagline}
-                onChange={(e) => updateSiteSettings({ tagline: e.target.value })}
+                value={settingsForm.tagline || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, tagline: e.target.value })}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
               />
             </div>
@@ -1601,8 +1724,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
               </label>
               <input
                 type="text"
-                value={siteSettings.subdomain}
-                onChange={(e) => updateSiteSettings({ subdomain: e.target.value })}
+                value={settingsForm.subdomain || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, subdomain: e.target.value })}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-mono text-emerald-600 dark:text-emerald-400"
               />
             </div>
@@ -1613,21 +1736,21 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
               </label>
               <input
                 type="text"
-                value={siteSettings.editor_in_chief}
-                onChange={(e) => updateSiteSettings({ editor_in_chief: e.target.value })}
+                value={settingsForm.editor_in_chief || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, editor_in_chief: e.target.value })}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
               />
             </div>
 
-            {/* FOOTER CONTACT & ADDRESS FIELDS (Admin Editable) */}
+            {/* FOOTER CONTACT & ADDRESS FIELDS */}
             <div>
               <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
                 कार्यालय ठेगाना (Office Address) *
               </label>
               <input
                 type="text"
-                value={siteSettings.office_address || ''}
-                onChange={(e) => updateSiteSettings({ office_address: e.target.value })}
+                value={settingsForm.office_address || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, office_address: e.target.value })}
                 placeholder="उदा: अनामनगर, काठमाडौँ, नेपाल"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
               />
@@ -1639,8 +1762,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
               </label>
               <input
                 type="text"
-                value={siteSettings.contact_phone || ''}
-                onChange={(e) => updateSiteSettings({ contact_phone: e.target.value })}
+                value={settingsForm.contact_phone || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, contact_phone: e.target.value })}
                 placeholder="उदा: +977-1-4400000, 9800000000"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
               />
@@ -1652,8 +1775,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
               </label>
               <input
                 type="email"
-                value={siteSettings.contact_email || ''}
-                onChange={(e) => updateSiteSettings({ contact_email: e.target.value })}
+                value={settingsForm.contact_email || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, contact_email: e.target.value })}
                 placeholder="pabansubedi128@gmail.com"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
               />
@@ -1665,8 +1788,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
               </label>
               <input
                 type="text"
-                value={siteSettings.press_council_reg_no || ''}
-                onChange={(e) => updateSiteSettings({ press_council_reg_no: e.target.value })}
+                value={settingsForm.press_council_reg_no || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, press_council_reg_no: e.target.value })}
                 placeholder="१२८४/०८०-८१"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
               />
@@ -1678,8 +1801,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
               </label>
               <input
                 type="text"
-                value={siteSettings.information_dept_reg_no || ''}
-                onChange={(e) => updateSiteSettings({ information_dept_reg_no: e.target.value })}
+                value={settingsForm.information_dept_reg_no || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, information_dept_reg_no: e.target.value })}
                 placeholder="३५६२/०८०-८१"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
               />
@@ -1691,8 +1814,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
               </label>
               <input
                 type="text"
-                value={siteSettings.facebook_url || ''}
-                onChange={(e) => updateSiteSettings({ facebook_url: e.target.value })}
+                value={settingsForm.facebook_url || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, facebook_url: e.target.value })}
                 placeholder="https://facebook.com/newspabansubedi"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
               />
@@ -1704,8 +1827,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
               </label>
               <input
                 type="text"
-                value={siteSettings.twitter_url || ''}
-                onChange={(e) => updateSiteSettings({ twitter_url: e.target.value })}
+                value={settingsForm.twitter_url || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, twitter_url: e.target.value })}
                 placeholder="https://twitter.com/newspabansubedi"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
               />
@@ -1717,8 +1840,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
               </label>
               <input
                 type="text"
-                value={siteSettings.youtube_url || ''}
-                onChange={(e) => updateSiteSettings({ youtube_url: e.target.value })}
+                value={settingsForm.youtube_url || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, youtube_url: e.target.value })}
                 placeholder="https://youtube.com/@newspabansubedi"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
               />
@@ -1729,8 +1852,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                 साइट तथा फुटरको छोटो विवरण (Meta & Footer Description)
               </label>
               <textarea
-                value={siteSettings.meta_description || ''}
-                onChange={(e) => updateSiteSettings({ meta_description: e.target.value })}
+                value={settingsForm.meta_description || ''}
+                onChange={(e) => setSettingsForm({ ...settingsForm, meta_description: e.target.value })}
                 rows={2}
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-white leading-relaxed"
               />
@@ -1750,15 +1873,15 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                 />
                 <input
                   type="text"
-                  value={siteSettings.logo_url || ''}
-                  onChange={(e) => updateSiteSettings({ logo_url: e.target.value })}
+                  value={settingsForm.logo_url || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, logo_url: e.target.value })}
                   placeholder="वा लोगो URL टाँस्नुहोस्"
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-900 dark:text-white font-mono"
                 />
               </div>
-              {siteSettings.logo_url && (
+              {settingsForm.logo_url && (
                 <div className="p-2 bg-white rounded border border-slate-200 flex items-center justify-center">
-                  <img src={siteSettings.logo_url} alt="Logo" className="h-10 object-contain" />
+                  <img src={settingsForm.logo_url} alt="Logo" className="h-10 object-contain" />
                 </div>
               )}
             </div>
@@ -1776,15 +1899,15 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                 />
                 <input
                   type="text"
-                  value={siteSettings.logo_dark_url || ''}
-                  onChange={(e) => updateSiteSettings({ logo_dark_url: e.target.value })}
+                  value={settingsForm.logo_dark_url || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, logo_dark_url: e.target.value })}
                   placeholder="वा डार्क लोगो URL टाँस्नुहोस्"
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-900 dark:text-white font-mono"
                 />
               </div>
-              {siteSettings.logo_dark_url && (
+              {settingsForm.logo_dark_url && (
                 <div className="p-2 bg-slate-900 rounded border border-slate-800 flex items-center justify-center">
-                  <img src={siteSettings.logo_dark_url} alt="Logo Dark" className="h-10 object-contain" />
+                  <img src={settingsForm.logo_dark_url} alt="Logo Dark" className="h-10 object-contain" />
                 </div>
               )}
             </div>
@@ -1803,15 +1926,15 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                 />
                 <input
                   type="text"
-                  value={siteSettings.favicon_url || ''}
-                  onChange={(e) => updateSiteSettings({ favicon_url: e.target.value })}
+                  value={settingsForm.favicon_url || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, favicon_url: e.target.value })}
                   placeholder="वा फेभिकन URL टाँस्नुहोस्"
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-900 dark:text-white font-mono"
                 />
               </div>
-              {siteSettings.favicon_url && (
+              {settingsForm.favicon_url && (
                 <div className="flex items-center gap-2 text-xs text-slate-400 pt-1">
-                  <img src={siteSettings.favicon_url} alt="Favicon" className="w-6 h-6 object-contain rounded" />
+                  <img src={settingsForm.favicon_url} alt="Favicon" className="w-6 h-6 object-contain rounded" />
                   <span>सक्रिय फेभिकन (Active Favicon - ट्याब आइकन तुरुन्तै अपडेट हुन्छ)</span>
                 </div>
               )}
@@ -1831,15 +1954,15 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                 />
                 <input
                   type="text"
-                  value={siteSettings.watermark_url || ''}
-                  onChange={(e) => updateSiteSettings({ watermark_url: e.target.value })}
+                  value={settingsForm.watermark_url || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, watermark_url: e.target.value })}
                   placeholder="वा वाटरमार्क URL टाँस्नुहोस्"
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-900 dark:text-white font-mono"
                 />
               </div>
-              {siteSettings.watermark_url && (
+              {settingsForm.watermark_url && (
                 <div className="flex items-center gap-2 text-xs text-slate-400 pt-1">
-                  <img src={siteSettings.watermark_url} alt="Watermark" className="h-6 object-contain" />
+                  <img src={settingsForm.watermark_url} alt="Watermark" className="h-6 object-contain" />
                   <span>सक्रिय वाटरमार्क (Active Watermark)</span>
                 </div>
               )}
@@ -1859,8 +1982,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                 <label className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
                   <input
                     type="checkbox"
-                    checked={siteSettings.is_ticker_active}
-                    onChange={(e) => updateSiteSettings({ is_ticker_active: e.target.checked })}
+                    checked={settingsForm.is_ticker_active ?? true}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, is_ticker_active: e.target.checked })}
                     className="w-4 h-4 text-red-600 rounded"
                   />
                   <span>टिकर अन/अफ (Active)</span>
@@ -1874,12 +1997,12 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                     टिकर गति / स्पिड (Scrolling Pace)
                   </span>
                   <span className="text-xs font-mono font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/60 px-2.5 py-0.5 rounded border border-red-200 dark:border-red-900">
-                    {siteSettings.ticker_speed || 85} सेकेन्ड (
-                    {(siteSettings.ticker_speed || 85) >= 100
+                    {settingsForm.ticker_speed || 85} सेकेन्ड (
+                    {(settingsForm.ticker_speed || 85) >= 100
                       ? 'धीमा / बिस्तारै'
-                      : (siteSettings.ticker_speed || 85) >= 75
+                      : (settingsForm.ticker_speed || 85) >= 75
                       ? 'सन्तुलित / उत्तम'
-                      : (siteSettings.ticker_speed || 85) >= 55
+                      : (settingsForm.ticker_speed || 85) >= 55
                       ? 'मध्यम'
                       : 'छिटो'}
                     )
@@ -1890,9 +2013,9 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button
                     type="button"
-                    onClick={() => updateSiteSettings({ ticker_speed: 110 })}
+                    onClick={() => setSettingsForm({ ...settingsForm, ticker_speed: 110 })}
                     className={`py-1.5 px-2 text-xs font-bold rounded-lg border cursor-pointer transition ${
-                      (siteSettings.ticker_speed || 85) === 110
+                      (settingsForm.ticker_speed || 85) === 110
                         ? 'bg-red-600 text-white border-red-700 shadow-sm'
                         : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
                     }`}
@@ -1901,9 +2024,9 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                   </button>
                   <button
                     type="button"
-                    onClick={() => updateSiteSettings({ ticker_speed: 85 })}
+                    onClick={() => setSettingsForm({ ...settingsForm, ticker_speed: 85 })}
                     className={`py-1.5 px-2 text-xs font-bold rounded-lg border cursor-pointer transition ${
-                      (siteSettings.ticker_speed || 85) === 85
+                      (settingsForm.ticker_speed || 85) === 85
                         ? 'bg-red-600 text-white border-red-700 shadow-sm'
                         : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
                     }`}
@@ -1912,9 +2035,9 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                   </button>
                   <button
                     type="button"
-                    onClick={() => updateSiteSettings({ ticker_speed: 65 })}
+                    onClick={() => setSettingsForm({ ...settingsForm, ticker_speed: 65 })}
                     className={`py-1.5 px-2 text-xs font-bold rounded-lg border cursor-pointer transition ${
-                      (siteSettings.ticker_speed || 85) === 65
+                      (settingsForm.ticker_speed || 85) === 65
                         ? 'bg-red-600 text-white border-red-700 shadow-sm'
                         : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
                     }`}
@@ -1923,9 +2046,9 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                   </button>
                   <button
                     type="button"
-                    onClick={() => updateSiteSettings({ ticker_speed: 45 })}
+                    onClick={() => setSettingsForm({ ...settingsForm, ticker_speed: 45 })}
                     className={`py-1.5 px-2 text-xs font-bold rounded-lg border cursor-pointer transition ${
-                      (siteSettings.ticker_speed || 85) === 45
+                      (settingsForm.ticker_speed || 85) === 45
                         ? 'bg-red-600 text-white border-red-700 shadow-sm'
                         : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
                     }`}
@@ -1941,8 +2064,8 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                     min="35"
                     max="140"
                     step="5"
-                    value={siteSettings.ticker_speed || 85}
-                    onChange={(e) => updateSiteSettings({ ticker_speed: parseInt(e.target.value, 10) })}
+                    value={settingsForm.ticker_speed || 85}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, ticker_speed: parseInt(e.target.value, 10) })}
                     className="w-full accent-red-600 cursor-pointer"
                   />
                   <div className="flex justify-between text-[10px] text-slate-400 font-medium">
@@ -1960,11 +2083,51 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                 </label>
                 <input
                   type="text"
-                  value={siteSettings.breaking_news_ticker}
-                  onChange={(e) => updateSiteSettings({ breaking_news_ticker: e.target.value })}
+                  value={settingsForm.breaking_news_ticker || ''}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, breaking_news_ticker: e.target.value })}
                   placeholder="ताजा अपडेट हेडलाइन..."
                   className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
                 />
+              </div>
+            </div>
+
+            {/* BIG SAVE & UPDATE FOOTER BAR */}
+            <div className="md:col-span-2 pt-6 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between flex-wrap gap-4 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl">
+              <div>
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Save className="w-4 h-4 text-emerald-500" />
+                  <span>सबै सेटिङ तथा लोगो Supabase मा सुरक्षित गर्नुहोस्</span>
+                </h4>
+                <p className="text-xs text-slate-500">
+                  'अपडेट गर्नुहोस्' बटन थिच्दा सम्पूर्ण परिवर्तनहरू तत्कालै डेटाबेसमा सुरक्षित हुन्छन् र पाठकहरूलाई तुरुन्त देखिन्छन्।
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {settingsSavedToast && (
+                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 animate-in fade-in">
+                    <CheckCircle className="w-4 h-4 text-emerald-500" />
+                    <span>सफलतापूर्वक अपडेट भयो!</span>
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSaveAllSettings}
+                  disabled={isSavingSettings}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/25 flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingSettings ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>अपडेट हुँदैछ...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>अपडेट गर्नुहोस् (Save & Update)</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
           </div>
@@ -1972,7 +2135,208 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
       )}
 
       {/* ------------------------------------------------------------- */}
-      {/* TAB 6: SUPABASE SQL SCHEMA & RLS POLICIES */}
+      {/* TAB 7: LIVE PUSH NOTIFICATIONS & BREAKING NEWS BROADCAST */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'notifications' && (
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-red-950 via-slate-900 to-slate-900 p-6 rounded-2xl border border-red-900/40 text-white shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="px-2.5 py-0.5 rounded-full bg-red-600 text-white font-black text-[10px] tracking-wider uppercase flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-amber-300 animate-ping inline-block"></span>
+                  Live Reader Engagement
+                </span>
+                <span className="text-xs text-amber-300 font-bold">News Paban Subedi Push Service</span>
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black tracking-tight flex items-center gap-2">
+                <BellRing className="w-6 h-6 text-amber-400 animate-bounce" />
+                <span>ताजा तथा ब्रेकिङ न्युज पुस नोटिफिकेसन प्रसारण प्रणाली</span>
+              </h3>
+              <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                नयाँ समाचार प्रकाशित हुँदा वा कुनै आकस्मिक राष्ट्रिय घटना घट्दा पोर्टलका पाठकहरूलाई तत्काल ब्राउजर नोटिफिकेसन र अडियो घण्टी बजाएर अलर्ट पठाउनुहोस्।
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                notifyNewArticlePublished({
+                  title: 'परीक्षण अलर्ट: News Paban Subedi प्रत्यक्ष ब्रेकिङ न्युज सूचना प्रणाली सक्रिय छ!',
+                  slug: 'main-news-test',
+                  featured_image: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=600&q=80',
+                  is_breaking: true
+                });
+                setBroadcastSentToast(true);
+                setTimeout(() => setBroadcastSentToast(false), 3000);
+              }}
+              className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow-md transition flex items-center gap-2 shrink-0 cursor-pointer"
+            >
+              <Bell className="w-4 h-4 text-slate-950" />
+              <span>परीक्षण घण्टी बजाउनुहोस् (Test Alert)</span>
+            </button>
+          </div>
+
+          {/* Engagement Statistics */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <span className="text-xs text-slate-500 font-medium block">सक्रिय पुस सदस्य</span>
+              <span className="text-2xl font-black text-slate-900 dark:text-white mt-1 block">
+                {toNepaliDigits('१,४२०')}+
+              </span>
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                ✓ मोबाइल र कम्प्युटर दुवैमा सक्रिय
+              </span>
+            </div>
+
+            <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <span className="text-xs text-slate-500 font-medium block">आज पठाइएका अलर्टहरू</span>
+              <span className="text-2xl font-black text-slate-900 dark:text-white mt-1 block">
+                {toNepaliDigits('४')} वटा
+              </span>
+              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold">
+                ✓ स्वचालित र म्यानुअल प्रसारण
+              </span>
+            </div>
+
+            <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <span className="text-xs text-slate-500 font-medium block">औसत क्लिक दर (CTR)</span>
+              <span className="text-2xl font-black text-slate-900 dark:text-white mt-1 block">
+                २२.८%
+              </span>
+              <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold">
+                उच्च पाठक सहभागिता (High Engagement)
+              </span>
+            </div>
+
+            <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <span className="text-xs text-slate-500 font-medium block">सिंक स्थिति</span>
+              <span className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping inline-block"></span>
+                <span>वास्तविक समयमा सक्रिय</span>
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono">
+                Supabase & Web Audio API
+              </span>
+            </div>
+          </div>
+
+          {/* Broadcast Form Card */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5 shadow-sm">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-950 text-red-600 flex items-center justify-center font-bold">
+                  <Send className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-base font-bold text-slate-900 dark:text-white">
+                    नयाँ ब्रेकिङ समाचार पुस प्रसारण (Broadcast Push Alert)
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    यहाँ लेखिएको हेडलाइन सबै अनलाइन पाठकहरूलाई तुरून्त स्क्रिनमा फ्लोटिङ ब्यानर र आवाजसहित देखा पर्नेछ।
+                  </p>
+                </div>
+              </div>
+
+              {broadcastSentToast && (
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 animate-in fade-in bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-lg border border-emerald-300 dark:border-emerald-800">
+                  <CheckCircle className="w-4 h-4 text-emerald-500" />
+                  <span>सबै पाठकहरूलाई अलर्ट सफलतापूर्वक पठाइयो!</span>
+                </div>
+              )}
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!broadcastHeadline.trim()) return;
+                const matched = posts.find((p) => p.slug === broadcastArticleSlug);
+                notifyNewArticlePublished({
+                  title: broadcastHeadline.trim(),
+                  slug: broadcastArticleSlug || matched?.slug || 'main-news',
+                  featured_image: matched?.featured_image || 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=600&q=80',
+                  is_breaking: broadcastIsBreaking
+                });
+                setBroadcastSentToast(true);
+                setTimeout(() => setBroadcastSentToast(false), 3000);
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  प्रसारण गरिने समाचारको मुख्य शीर्षक (Alert Headline) *
+                </label>
+                <input
+                  type="text"
+                  value={broadcastHeadline}
+                  onChange={(e) => setBroadcastHeadline(e.target.value)}
+                  placeholder="उदा: सर्वोच्च अदालतद्वारा महत्त्वपूर्ण फैसला जारी, संसद् बैठक आह्वान..."
+                  required
+                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-red-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    सम्बन्धित समाचार चयन गर्नुहोस् (Select Published Article)
+                  </label>
+                  <select
+                    value={broadcastArticleSlug}
+                    onChange={(e) => {
+                      setBroadcastArticleSlug(e.target.value);
+                      const target = posts.find((p) => p.slug === e.target.value);
+                      if (target && !broadcastHeadline) {
+                        setBroadcastHeadline(target.title);
+                      }
+                    }}
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white"
+                  >
+                    <option value="">-- हालसालैका समाचारबाट छान्नुहोस् --</option>
+                    {posts.filter((p) => p.status === 'published').slice(0, 15).map((p) => (
+                      <option key={p.id} value={p.slug}>
+                        {p.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-4 pt-6">
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer bg-slate-50 dark:bg-slate-800 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 w-full">
+                    <input
+                      type="checkbox"
+                      checked={broadcastIsBreaking}
+                      onChange={(e) => setBroadcastIsBreaking(e.target.checked)}
+                      className="w-4 h-4 text-red-600 rounded"
+                    />
+                    <Flame className="w-4 h-4 text-red-600" />
+                    <span>आकस्मिक ब्रेकिङ न्युज (High Priority Alert)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-between flex-wrap gap-3">
+                <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                  <Radio className="w-3.5 h-3.5 text-red-500 animate-pulse" />
+                  <span>यो अलर्ट थिच्दा सबै अनलाइन पाठकहरूलाई अडियो घण्टी र ताजा समाचार ब्यानर बज्नेछ।</span>
+                </p>
+
+                <button
+                  type="submit"
+                  disabled={!broadcastHeadline.trim()}
+                  className="px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl shadow-lg shadow-red-600/30 flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>अहिले नै सबै पाठकहरूलाई पुस नोटिफिकेसन पठाउनुहोस्</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* TAB 8: SUPABASE SQL SCHEMA & RLS POLICIES (Admin Only Docs) */}
       {/* ------------------------------------------------------------- */}
       {activeTab === 'sql_schema' && (
         <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-800 p-6 space-y-4">

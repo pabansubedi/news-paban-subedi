@@ -159,19 +159,9 @@ export const Footer: React.FC = () => {
                 </button>
               ))}
             </div>
-
-            <div className="pt-4">
-              <button
-                onClick={() => navigateTo('docs')}
-                className="text-xs text-slate-400 hover:text-amber-400 flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Supabase & Next.js गाइड (Docs)</span>
-              </button>
-            </div>
           </div>
 
-          {/* Column 3: Live News Visitor Count Widget */}
+          {/* Column 3: Live News Visitor Count Widget (Clean & Realistic) */}
           <div className="space-y-4">
             <h4 className="text-sm font-bold text-white uppercase tracking-wider border-l-2 border-red-600 pl-2 flex items-center gap-2">
               <Users className="w-4 h-4 text-red-500" />
@@ -202,9 +192,6 @@ export const Footer: React.FC = () => {
                 <span className="text-amber-400 font-semibold">{toNepaliDigits('१२,४५०')} प्रति दिन</span>
               </div>
             </div>
-            <p className="text-[11px] text-slate-500">
-              * पाठक तथा समाचार भ्युज काउन्टर Supabase PostgreSQL मार्फत वास्तविक समयमा अपडेट हुन्छ।
-            </p>
           </div>
 
           {/* Column 4: Dynamic Contact & Address Details (100% Admin Editable) */}

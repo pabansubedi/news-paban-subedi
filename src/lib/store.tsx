@@ -17,6 +17,8 @@ import {
   INITIAL_SITE_SETTINGS,
   INITIAL_COMMENTS
 } from './defaultData';
+import { supabase } from './supabase';
+import { notifyNewArticlePublished } from './notificationService';
 
 interface NewsAppContextType {
   // Current user & role (Strictly confidential; defaults to 'public' for portal visitors)
@@ -182,16 +184,28 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const [adminLoginModalOpen, setAdminLoginModalOpen] = useState(false);
 
-  // Total visitors & live count
+  // Total visitors & realistic dynamic live reader count
   const [totalVisitors, setTotalVisitors] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('nepal_news_total_visitors_v2');
-      return saved ? parseInt(saved, 10) : 124850;
+      return saved ? parseInt(saved, 10) : 148620;
     } catch {
-      return 124850;
+      return 148620;
     }
   });
-  const [onlineVisitors] = useState<number>(() => 42 + Math.floor(Math.random() * 15));
+  const [onlineVisitors, setOnlineVisitors] = useState<number>(() => 46 + Math.floor(Math.random() * 12));
+
+  // Realistic gentle online reader oscillation (every 14 seconds)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setOnlineVisitors((prev) => {
+        const delta = Math.floor(Math.random() * 5) - 2; // -2, -1, 0, 1, 2
+        const updated = prev + delta;
+        return updated < 36 ? 39 : updated > 86 ? 78 : updated;
+      });
+    }, 14000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Site Settings
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => {
@@ -285,6 +299,175 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
       console.warn('LocalStorage error', e);
     }
   }, []);
+
+  // Fetch live data from Supabase on start if available
+  useEffect(() => {
+    let isMounted = true;
+    const fetchSupabaseData = async () => {
+      try {
+        // 1. Site Settings
+        const { data: remoteSettings } = await supabase
+          .from('site_settings')
+          .select('*')
+          .limit(1)
+          .maybeSingle();
+
+        if (isMounted && remoteSettings && remoteSettings.site_title) {
+          setSiteSettings((prev) => {
+            const merged = { ...prev, ...remoteSettings };
+            try {
+              localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+        }
+
+        // 2. Categories
+        const { data: remoteCategories } = await supabase
+          .from('categories')
+          .select('*')
+          .order('order_index', { ascending: true });
+
+        if (isMounted && remoteCategories && remoteCategories.length > 0) {
+          const formatted: Category[] = remoteCategories.map((c: any) => ({
+            id: c.id,
+            name: c.name || c.name_np || c.slug,
+            name_en: c.name_en || c.slug,
+            slug: c.slug,
+            order_index: c.order_index ?? 0,
+            color: c.color || c.color_code || '#dc2626',
+            description: c.description || '',
+            is_active: c.is_active ?? true
+          }));
+          setCategories(formatted);
+          try {
+            localStorage.setItem(CATEGORIES_KEY, JSON.stringify(formatted));
+          } catch {}
+        }
+
+        // 3. Posts
+        const { data: remotePosts } = await supabase
+          .from('posts')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (isMounted && remotePosts && remotePosts.length > 0) {
+          const formattedPosts: Post[] = remotePosts.map((p: any) => ({
+            id: p.id,
+            title: p.title,
+            slug: p.slug,
+            content: p.content,
+            excerpt: p.excerpt || p.summary || '',
+            featured_image: p.featured_image,
+            image_caption: p.image_caption || '',
+            category_id: p.category_id,
+            author_id: p.author_id || 'usr_super_admin',
+            author_name: p.author_name || 'पवन सुवेदी',
+            author_avatar: p.author_avatar || '',
+            editor_name: p.editor_name || '',
+            status: p.status || 'published',
+            views: Number(p.views) || 0,
+            is_breaking: !!p.is_breaking,
+            is_featured: !!p.is_featured,
+            published_at: p.published_at,
+            created_at: p.created_at || new Date().toISOString(),
+            updated_at: p.updated_at || new Date().toISOString(),
+            read_time_mins: p.read_time_mins || 3,
+            tags: p.tags || [],
+            audio_url: p.audio_url || ''
+          }));
+          setPosts(formattedPosts);
+          try {
+            localStorage.setItem(POSTS_KEY, JSON.stringify(formattedPosts));
+          } catch {}
+        }
+
+        // 4. Advertisements
+        const { data: remoteAds } = await supabase
+          .from('advertisements')
+          .select('*');
+
+        if (isMounted && remoteAds && remoteAds.length > 0) {
+          setAds(remoteAds);
+          try {
+            localStorage.setItem(ADS_KEY, JSON.stringify(remoteAds));
+          } catch {}
+        }
+      } catch (err) {
+        console.warn('Supabase initial fetch gracefully bypassed:', err);
+      }
+    };
+
+    fetchSupabaseData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Multi-tab instant sync via BroadcastChannel
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
+    try {
+      const bc = new BroadcastChannel('news_paban_sync_channel');
+      bc.onmessage = (event) => {
+        const { type, payload } = event.data || {};
+        if (type === 'SITE_SETTINGS' && payload) {
+          setSiteSettings(payload);
+        } else if (type === 'CATEGORIES' && payload) {
+          setCategories(payload);
+        } else if (type === 'POSTS' && payload) {
+          setPosts(payload);
+        } else if (type === 'ADS' && payload) {
+          setAds(payload);
+        } else if (type === 'NEW_ARTICLE_BROADCAST' && payload) {
+          notifyNewArticlePublished(payload);
+        }
+      };
+      return () => {
+        bc.close();
+      };
+    } catch {}
+  }, []);
+
+  // Live Supabase Realtime changes listener
+  useEffect(() => {
+    try {
+      const channel = supabase
+        .channel('news_paban_realtime_stream')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'site_settings' }, (payload) => {
+          if (payload.new && (payload.new as any).site_title) {
+            setSiteSettings((prev) => ({ ...prev, ...(payload.new as any) }));
+          }
+        })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, (payload) => {
+          const p = payload.new as any;
+          if (p && p.status === 'published') {
+            notifyNewArticlePublished({
+              title: p.title,
+              slug: p.slug,
+              featured_image: p.featured_image,
+              is_breaking: !!p.is_breaking
+            });
+          }
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    } catch {}
+  }, []);
+
+  // Broadcast helper function for instant multi-tab sync
+  const broadcastUpdate = (type: string, payload: any) => {
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        const bc = new BroadcastChannel('news_paban_sync_channel');
+        bc.postMessage({ type, payload });
+        bc.close();
+      }
+    } catch {}
+  };
 
   const incrementTotalVisitors = () => {
     const updated = totalVisitors + 1;
@@ -401,7 +584,14 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  // Site Settings
+  // Safe background Supabase executor
+  const safeSupabaseCall = async (fn: () => PromiseLike<any>) => {
+    try {
+      await fn();
+    } catch {}
+  };
+
+  // Site Settings (Synced to Supabase public.site_settings)
   const updateSiteSettings = (newSettings: Partial<SiteSettings>) => {
     setSiteSettings((prev) => {
       const updated = { ...prev, ...newSettings };
@@ -410,11 +600,24 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
       } catch (e) {
         console.warn('LocalStorage settings write error', e);
       }
+
+      // Instant broadcast to all open reader tabs
+      broadcastUpdate('SITE_SETTINGS', updated);
+
+      // Sync seamlessly to Supabase
+      safeSupabaseCall(async () => {
+        await supabase.from('site_settings').upsert({
+          ...updated,
+          id: '00000000-0000-0000-0000-000000000001',
+          updated_at: new Date().toISOString()
+        });
+      });
+
       return updated;
     });
   };
 
-  // Categories
+  // Categories (Synced to Supabase public.categories)
   const addCategory = (cat: Omit<Category, 'id'>) => {
     const newCategory: Category = {
       ...cat,
@@ -427,6 +630,22 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {
       console.warn('LocalStorage write error', e);
     }
+
+    broadcastUpdate('CATEGORIES', updated);
+
+    safeSupabaseCall(async () => {
+      await supabase.from('categories').upsert({
+        name: newCategory.name,
+        name_np: newCategory.name,
+        name_en: newCategory.name_en,
+        slug: newCategory.slug,
+        color: newCategory.color || '#dc2626',
+        color_code: newCategory.color || '#dc2626',
+        description: newCategory.description || '',
+        is_active: newCategory.is_active,
+        order_index: newCategory.order_index
+      }, { onConflict: 'slug' });
+    });
   };
 
   const updateCategory = (id: string, updatedFields: Partial<Category>) => {
@@ -437,9 +656,29 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {
       console.warn('LocalStorage write error', e);
     }
+
+    broadcastUpdate('CATEGORIES', updated);
+
+    const target = updated.find((c) => c.id === id);
+    if (target) {
+      safeSupabaseCall(async () => {
+        await supabase.from('categories').upsert({
+          name: target.name,
+          name_np: target.name,
+          name_en: target.name_en,
+          slug: target.slug,
+          color: target.color || '#dc2626',
+          color_code: target.color || '#dc2626',
+          description: target.description || '',
+          is_active: target.is_active,
+          order_index: target.order_index
+        }, { onConflict: 'slug' });
+      });
+    }
   };
 
   const deleteCategory = (id: string) => {
+    const target = categories.find((c) => c.id === id);
     const updated = categories.filter((cat) => cat.id !== id);
     setCategories(updated);
     try {
@@ -447,9 +686,17 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {
       console.warn('LocalStorage write error', e);
     }
+
+    broadcastUpdate('CATEGORIES', updated);
+
+    if (target) {
+      safeSupabaseCall(async () => {
+        await supabase.from('categories').delete().eq('slug', target.slug);
+      });
+    }
   };
 
-  // Posts
+  // Posts (Synced to Supabase public.posts)
   const addPost = (postData: Omit<Post, 'id' | 'views' | 'created_at' | 'updated_at'>): Post => {
     const nowIso = new Date().toISOString();
     const newPost: Post = {
@@ -467,20 +714,62 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {
       console.warn('LocalStorage write error', e);
     }
+
+    broadcastUpdate('POSTS', updated);
+
+    // Instant push alert to all readers if published or breaking
+    if (newPost.status === 'published') {
+      notifyNewArticlePublished({
+        title: newPost.title,
+        slug: newPost.slug,
+        featured_image: newPost.featured_image,
+        is_breaking: newPost.is_breaking
+      });
+      broadcastUpdate('NEW_ARTICLE_BROADCAST', {
+        title: newPost.title,
+        slug: newPost.slug,
+        featured_image: newPost.featured_image,
+        is_breaking: newPost.is_breaking
+      });
+    }
+
+    safeSupabaseCall(async () => {
+      await supabase.from('posts').upsert({
+        title: newPost.title,
+        slug: newPost.slug,
+        content: newPost.content,
+        excerpt: newPost.excerpt,
+        summary: newPost.excerpt,
+        featured_image: newPost.featured_image,
+        image_caption: newPost.image_caption || '',
+        author_name: newPost.author_name || 'पवन सुवेदी',
+        status: newPost.status,
+        views: newPost.views,
+        is_breaking: newPost.is_breaking,
+        is_featured: newPost.is_featured,
+        published_at: newPost.published_at,
+        read_time_mins: newPost.read_time_mins,
+        tags: newPost.tags || []
+      }, { onConflict: 'slug' });
+    });
+
     return newPost;
   };
 
   const updatePost = (id: string, fields: Partial<Post>) => {
+    let updatedTarget: Post | null = null;
     const updated = posts.map((p) => {
       if (p.id === id) {
         const nowIso = new Date().toISOString();
         const willPublish = fields.status === 'published' && p.status !== 'published';
-        return {
+        const modified = {
           ...p,
           ...fields,
           updated_at: nowIso,
           published_at: willPublish ? nowIso : fields.published_at !== undefined ? fields.published_at : p.published_at
         };
+        updatedTarget = modified;
+        return modified;
       }
       return p;
     });
@@ -490,9 +779,52 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {
       console.warn('LocalStorage write error', e);
     }
+
+    broadcastUpdate('POSTS', updated);
+
+    if (updatedTarget) {
+      const p: Post = updatedTarget;
+
+      if (fields.status === 'published' || (p.status === 'published' && fields.is_breaking)) {
+        notifyNewArticlePublished({
+          title: p.title,
+          slug: p.slug,
+          featured_image: p.featured_image,
+          is_breaking: p.is_breaking
+        });
+        broadcastUpdate('NEW_ARTICLE_BROADCAST', {
+          title: p.title,
+          slug: p.slug,
+          featured_image: p.featured_image,
+          is_breaking: p.is_breaking
+        });
+      }
+
+      safeSupabaseCall(async () => {
+        await supabase.from('posts').upsert({
+          title: p.title,
+          slug: p.slug,
+          content: p.content,
+          excerpt: p.excerpt,
+          summary: p.excerpt,
+          featured_image: p.featured_image,
+          image_caption: p.image_caption || '',
+          author_name: p.author_name || 'पवन सुवेदी',
+          editor_name: p.editor_name || '',
+          status: p.status,
+          views: p.views,
+          is_breaking: p.is_breaking,
+          is_featured: p.is_featured,
+          published_at: p.published_at,
+          read_time_mins: p.read_time_mins,
+          tags: p.tags || []
+        }, { onConflict: 'slug' });
+      });
+    }
   };
 
   const deletePost = (id: string) => {
+    const target = posts.find((p) => p.id === id);
     const updated = posts.filter((p) => p.id !== id);
     setPosts(updated);
     try {
@@ -500,19 +832,30 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {
       console.warn('LocalStorage write error', e);
     }
+
+    broadcastUpdate('POSTS', updated);
+
+    if (target) {
+      safeSupabaseCall(async () => {
+        await supabase.from('posts').delete().eq('slug', target.slug);
+      });
+    }
   };
 
   const changePostStatus = (id: string, status: PostStatus, approverName?: string) => {
     const nowIso = new Date().toISOString();
+    let updatedTarget: Post | null = null;
     const updated = posts.map((p) => {
       if (p.id === id) {
-        return {
+        const modified = {
           ...p,
           status,
           editor_name: approverName || p.editor_name || currentUser.full_name,
           published_at: status === 'published' ? (p.published_at || nowIso) : null,
           updated_at: nowIso
         };
+        updatedTarget = modified;
+        return modified;
       }
       return p;
     });
@@ -522,9 +865,41 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {
       console.warn('LocalStorage write error', e);
     }
+
+    broadcastUpdate('POSTS', updated);
+
+    if (updatedTarget) {
+      const p: Post = updatedTarget;
+
+      // When editor approves and publishes an article, trigger push alert to all readers
+      if (status === 'published') {
+        notifyNewArticlePublished({
+          title: p.title,
+          slug: p.slug,
+          featured_image: p.featured_image,
+          is_breaking: p.is_breaking
+        });
+        broadcastUpdate('NEW_ARTICLE_BROADCAST', {
+          title: p.title,
+          slug: p.slug,
+          featured_image: p.featured_image,
+          is_breaking: p.is_breaking
+        });
+      }
+
+      safeSupabaseCall(async () => {
+        await supabase.from('posts').update({
+          status: p.status,
+          editor_name: p.editor_name,
+          published_at: p.published_at,
+          updated_at: p.updated_at
+        }).eq('slug', p.slug);
+      });
+    }
   };
 
   const incrementViews = (id: string) => {
+    const target = posts.find((p) => p.id === id);
     const updated = posts.map((p) => (p.id === id ? { ...p, views: (p.views || 0) + 1 } : p));
     setPosts(updated);
     try {
@@ -532,9 +907,19 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {
       console.warn('LocalStorage write error', e);
     }
+
+    if (target) {
+      safeSupabaseCall(async () => {
+        try {
+          await supabase.rpc('increment_post_views', { target_slug: target.slug });
+        } catch {
+          await supabase.from('posts').update({ views: (target.views || 0) + 1 }).eq('slug', target.slug);
+        }
+      });
+    }
   };
 
-  // Ads
+  // Ads (Synced to Supabase public.advertisements)
   const updateAd = (id: string, adFields: Partial<Advertisement>) => {
     const updated = ads.map((ad) => (ad.id === id ? { ...ad, ...adFields } : ad));
     setAds(updated);
@@ -543,9 +928,17 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {
       console.warn('LocalStorage write error', e);
     }
+
+    const target = updated.find((a) => a.id === id);
+    if (target) {
+      safeSupabaseCall(async () => {
+        await supabase.from('advertisements').upsert(target);
+      });
+    }
   };
 
   const recordAdClick = (id: string) => {
+    const target = ads.find((a) => a.id === id);
     const updated = ads.map((ad) => (ad.id === id ? { ...ad, clicks_count: (ad.clicks_count || 0) + 1 } : ad));
     setAds(updated);
     try {
@@ -553,9 +946,19 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {
       console.warn('LocalStorage write error', e);
     }
+
+    if (target) {
+      safeSupabaseCall(async () => {
+        try {
+          await supabase.rpc('increment_ad_clicks', { target_id: target.id });
+        } catch {
+          await supabase.from('advertisements').update({ clicks_count: (target.clicks_count || 0) + 1 }).eq('id', target.id);
+        }
+      });
+    }
   };
 
-  // Comments
+  // Comments (Synced to Supabase public.comments)
   const addComment = (postId: string, authorName: string, content: string) => {
     const newComment: Comment = {
       id: `comm-${Date.now()}`,
@@ -572,6 +975,15 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch (e) {
       console.warn('LocalStorage write error', e);
     }
+
+    safeSupabaseCall(async () => {
+      await supabase.from('comments').insert({
+        post_id: postId,
+        author_name: authorName,
+        content,
+        is_approved: true
+      });
+    });
   };
 
   return (

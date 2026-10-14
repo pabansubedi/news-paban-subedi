@@ -13,7 +13,7 @@ import { AdminDashboard } from './components/admin/AdminDashboard';
 import { DocsView } from './components/DocsView';
 
 const MainLayout: React.FC = () => {
-  const { currentRoute, siteSettings, posts } = useNewsApp();
+  const { currentRoute, siteSettings, posts, currentRole } = useNewsApp();
 
   // Dynamic SEO & Title sync based on active view
   useEffect(() => {
@@ -107,7 +107,11 @@ const MainLayout: React.FC = () => {
         )}
 
         {currentRoute.page === 'docs' && (
-          <DocsView />
+          currentRole === 'super_admin' ? (
+            <DocsView />
+          ) : (
+            <HomePage />
+          )
         )}
       </main>
 

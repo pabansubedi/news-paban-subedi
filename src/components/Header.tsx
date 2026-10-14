@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNewsApp } from '../lib/store';
 import { getNepaliDate, formatTimeNepali, toNepaliDigits } from '../lib/nepaliDate';
 import { AdBanner } from './AdBanner';
+import { NotificationBell } from './NotificationBell';
 import {
   Calendar,
   Clock,
@@ -99,8 +100,10 @@ export const Header: React.FC = () => {
             </div>
           </div>
 
-          {/* Right: Staff Login / CMS Panel & Dark Mode toggle */}
+          {/* Right: Push Notification Bell, Staff Login / CMS Panel & Dark Mode toggle */}
           <div className="flex items-center gap-2 sm:gap-3">
+            <NotificationBell />
+
             {currentRole === 'public' ? (
               <button
                 onClick={() => setAdminLoginModalOpen(true)}
@@ -231,42 +234,42 @@ export const Header: React.FC = () => {
           onClick={() => navigateTo('home')}
           className="cursor-pointer flex items-center gap-3.5 group select-none"
         >
+          {/* Logo image or Emblem Crest */}
           {siteSettings.logo_url ? (
             <img
               src={isDarkMode && siteSettings.logo_dark_url ? siteSettings.logo_dark_url : siteSettings.logo_url}
               alt={siteSettings.site_title}
-              className="h-14 sm:h-16 object-contain"
+              className="h-12 sm:h-14 md:h-16 max-w-[160px] sm:max-w-[200px] object-contain rounded-lg group-hover:scale-105 transition-transform"
             />
           ) : (
-            <div className="flex items-center gap-3">
-              {/* Emblem Crest Icon */}
-              <div className="relative w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-red-600 via-rose-700 to-red-900 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-red-600/25 group-hover:scale-105 transition-transform">
-                <Flame className="w-7 h-7 text-amber-300" />
-                <div className="absolute -bottom-1 -right-1 bg-blue-900 text-[9px] font-black px-1.5 py-0.2 rounded-full border border-white text-white">
-                  NP
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight leading-none group-hover:text-red-600 dark:group-hover:text-red-400 transition">
-                    News Paban Subedi
-                  </h1>
-                </div>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-sm font-bold text-red-600 dark:text-red-400">
-                    न्युज पवन सुवेदी
-                  </span>
-                  <span className="text-slate-300 dark:text-slate-700">•</span>
-                  <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                    {siteSettings.subdomain}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1 hidden sm:block">
-                  {siteSettings.tagline}
-                </p>
+            <div className="relative w-12 h-12 sm:w-14 sm:h-14 bg-gradient-to-br from-red-600 via-rose-700 to-red-900 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-red-600/25 group-hover:scale-105 transition-transform shrink-0">
+              <Flame className="w-7 h-7 text-amber-300" />
+              <div className="absolute -bottom-1 -right-1 bg-blue-900 text-[9px] font-black px-1.5 py-0.2 rounded-full border border-white text-white">
+                NP
               </div>
             </div>
           )}
+
+          {/* Typography: News Paban Subedi & न्युज पवन सुवेदी */}
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight leading-none group-hover:text-red-600 dark:group-hover:text-red-400 transition">
+                News Paban Subedi
+              </h1>
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-sm font-bold text-red-600 dark:text-red-400">
+                न्युज पवन सुवेदी
+              </span>
+              <span className="text-slate-300 dark:text-slate-700">•</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                {siteSettings.subdomain}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-1 hidden sm:block">
+              {siteSettings.tagline}
+            </p>
+          </div>
         </div>
 
         {/* Ad Location 1: Header Top Banner (728x90) */}

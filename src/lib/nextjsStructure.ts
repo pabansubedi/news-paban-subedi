@@ -72,9 +72,10 @@ export const NEXTJS_FOLDER_STRUCTURE = `news-portal-nepal/
 └── tailwind.config.ts`;
 
 export const CODE_SNIPPETS = {
-  envConfig: `# .env.local for news.pabansubedi.com.np
-NEXT_PUBLIC_SUPABASE_URL=https://sjuhibdipqznpedphptu.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_NlZ7AdufiBB7fauxDe6uJw_jnrfpO7h
+  envConfig: `# .env.local for news.pabansubedi.com.np (Production Environment Variables)
+# Replace with your actual project credentials from Supabase Dashboard > Settings > API
+NEXT_PUBLIC_SUPABASE_URL=https://[YOUR_PROJECT_ID].supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_publishable_key_here
 NEXT_PUBLIC_SITE_URL=https://news.pabansubedi.com.np`,
 
   supabaseClient: `// lib/supabase/client.ts
@@ -82,8 +83,8 @@ import { createBrowserClient } from '@supabase/ssr';
 
 export function createClient() {
   return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://sjuhibdipqznpedphptu.supabase.co',
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_NlZ7AdufiBB7fauxDe6uJw_jnrfpO7h'
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 }`,
 
