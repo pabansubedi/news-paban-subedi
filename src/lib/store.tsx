@@ -429,25 +429,117 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch {}
   }, []);
 
-  // Live Supabase Realtime changes listener
+  // Live Supabase Realtime changes listener (100% full-duplex sync for all visitors)
   useEffect(() => {
     try {
       const channel = supabase
         .channel('news_paban_realtime_stream')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'site_settings' }, (payload) => {
           if (payload.new && (payload.new as any).site_title) {
-            setSiteSettings((prev) => ({ ...prev, ...(payload.new as any) }));
+            setSiteSettings((prev) => {
+              const updated = { ...prev, ...(payload.new as any) };
+              try {
+                localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
           }
         })
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, (payload) => {
           const p = payload.new as any;
-          if (p && p.status === 'published') {
-            notifyNewArticlePublished({
+          if (p && p.id) {
+            const formatted: Post = {
+              id: p.id,
               title: p.title,
               slug: p.slug,
+              content: p.content,
+              excerpt: p.excerpt || p.summary || '',
               featured_image: p.featured_image,
-              is_breaking: !!p.is_breaking
+              image_caption: p.image_caption || '',
+              category_id: p.category_id,
+              author_id: p.author_id || 'usr_super_admin',
+              author_name: p.author_name || 'पवन सुवेदी',
+              author_avatar: p.author_avatar || '',
+              editor_name: p.editor_name || '',
+              status: p.status || 'published',
+              views: Number(p.views) || 0,
+              is_breaking: !!p.is_breaking,
+              is_featured: !!p.is_featured,
+              published_at: p.published_at,
+              created_at: p.created_at || new Date().toISOString(),
+              updated_at: p.updated_at || new Date().toISOString(),
+              read_time_mins: p.read_time_mins || 3,
+              tags: p.tags || [],
+              audio_url: p.audio_url || ''
+            };
+
+            setPosts((prev) => {
+              if (prev.some((x) => x.id === formatted.id || x.slug === formatted.slug)) {
+                return prev.map((x) => (x.id === formatted.id || x.slug === formatted.slug ? formatted : x));
+              }
+              return [formatted, ...prev];
             });
+
+            if (formatted.status === 'published') {
+              notifyNewArticlePublished({
+                title: formatted.title,
+                slug: formatted.slug,
+                featured_image: formatted.featured_image,
+                is_breaking: formatted.is_breaking
+              });
+            }
+          }
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'posts' }, (payload) => {
+          const p = payload.new as any;
+          if (p && p.id) {
+            setPosts((prev) =>
+              prev.map((item) => {
+                if (item.id === p.id || item.slug === p.slug) {
+                  const updatedItem = { ...item, ...p };
+                  if (p.status === 'published' && item.status !== 'published') {
+                    notifyNewArticlePublished({
+                      title: updatedItem.title,
+                      slug: updatedItem.slug,
+                      featured_image: updatedItem.featured_image,
+                      is_breaking: updatedItem.is_breaking
+                    });
+                  }
+                  return updatedItem;
+                }
+                return item;
+              })
+            );
+          }
+        })
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'posts' }, (payload) => {
+          const old = payload.old as any;
+          if (old && (old.id || old.slug)) {
+            setPosts((prev) => prev.filter((item) => item.id !== old.id && item.slug !== old.slug));
+          }
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, async () => {
+          try {
+            const { data } = await supabase.from('categories').select('*').order('order_index', { ascending: true });
+            if (data && data.length > 0) {
+              const formatted: Category[] = data.map((c: any) => ({
+                id: c.id,
+                name: c.name || c.name_np || c.slug,
+                name_en: c.name_en || c.slug,
+                slug: c.slug,
+                order_index: c.order_index ?? 0,
+                color: c.color || c.color_code || '#dc2626',
+                description: c.description || '',
+                is_active: c.is_active ?? true
+              }));
+              setCategories(formatted);
+            }
+          } catch {}
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'advertisements' }, (payload) => {
+          if (payload.new && (payload.new as any).id) {
+            const newAd = payload.new as any;
+            setAds((prev) => prev.map((ad) => (ad.id === newAd.id ? { ...ad, ...newAd } : ad)));
           }
         })
         .subscribe();
