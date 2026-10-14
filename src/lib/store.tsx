@@ -550,14 +550,93 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch {}
   }, []);
 
-  // Broadcast helper function for instant multi-tab sync
+  // 2. Multi-browser & Multi-device Global Realtime Broadcast via Supabase
+  useEffect(() => {
+    let globalBus: any = null;
+    try {
+      globalBus = supabase.channel('news_paban_global_bus', {
+        config: { broadcast: { self: false } }
+      });
+
+      globalBus
+        .on('broadcast', { event: 'GLOBAL_SYNC' }, (event: any) => {
+          const { type, data } = event.payload || {};
+          if (type === 'SITE_SETTINGS' && data) {
+            setSiteSettings((prev) => {
+              const updated = { ...prev, ...data };
+              try {
+                localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
+          } else if (type === 'POSTS' && data) {
+            setPosts(data);
+            try {
+              localStorage.setItem(POSTS_KEY, JSON.stringify(data));
+            } catch {}
+          } else if (type === 'CATEGORIES' && data) {
+            setCategories(data);
+            try {
+              localStorage.setItem(CATEGORIES_KEY, JSON.stringify(data));
+            } catch {}
+          } else if (type === 'NEW_ARTICLE_BROADCAST' && data) {
+            notifyNewArticlePublished(data);
+          }
+        })
+        .subscribe();
+    } catch {}
+
+    // 3. Fallback background sync (every 5 seconds) to guarantee 100% real-time cross-browser sync
+    const pollInterval = setInterval(async () => {
+      try {
+        const { data: remoteSettings } = await supabase
+          .from('site_settings')
+          .select('*')
+          .limit(1)
+          .maybeSingle();
+
+        if (remoteSettings && remoteSettings.site_title) {
+          setSiteSettings((prev) => {
+            if (remoteSettings.updated_at && remoteSettings.updated_at !== prev.updated_at) {
+              const merged = { ...prev, ...remoteSettings };
+              try {
+                localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+              } catch {}
+              return merged;
+            }
+            return prev;
+          });
+        }
+      } catch {}
+    }, 5000);
+
+    return () => {
+      clearInterval(pollInterval);
+      if (globalBus) {
+        supabase.removeChannel(globalBus);
+      }
+    };
+  }, []);
+
+  // Broadcast helper function for instant multi-tab & multi-browser sync
   const broadcastUpdate = (type: string, payload: any) => {
+    // A. Same-browser tabs
     try {
       if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
         const bc = new BroadcastChannel('news_paban_sync_channel');
         bc.postMessage({ type, payload });
         bc.close();
       }
+    } catch {}
+
+    // B. Worldwide cross-browser and cross-device sync via Supabase Realtime
+    try {
+      const bus = supabase.channel('news_paban_global_bus');
+      bus.send({
+        type: 'broadcast',
+        event: 'GLOBAL_SYNC',
+        payload: { type, data: payload }
+      });
     } catch {}
   };
 

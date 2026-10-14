@@ -97,6 +97,7 @@ export interface SiteSettings {
   allow_comments: boolean;
   total_visitors?: number;
   online_visitors?: number;
+  updated_at?: string;
 }
 
 export interface Comment {
