@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, BellRing, BellOff, Volume2, VolumeX, Flame, X, ArrowRight, Check } from 'lucide-react';
+import { Bell, BellRing, Volume2, VolumeX, Flame, X, ArrowRight } from 'lucide-react';
 import {
   NotificationSettings,
   getNotificationPreferences,
   saveNotificationPreferences,
   requestPushPermission,
-  playNotificationChime,
-  notifyNewArticlePublished
+  playNotificationChime
 } from '../lib/notificationService';
 import { useNewsApp } from '../lib/store';
 
@@ -25,7 +24,6 @@ export const NotificationBell: React.FC = () => {
   const [settings, setSettings] = useState<NotificationSettings>(getNotificationPreferences);
   const [permissionState, setPermissionState] = useState<string>('default');
   const [activeToast, setActiveToast] = useState<ToastAlert | null>(null);
-  const [testSent, setTestSent] = useState(false);
   const [showPromptBanner, setShowPromptBanner] = useState<boolean>(false);
 
   useEffect(() => {
@@ -120,17 +118,6 @@ export const NotificationBell: React.FC = () => {
     const updated = { ...settings, breakingOnly: !settings.breakingOnly };
     setSettings(updated);
     saveNotificationPreferences(updated);
-  };
-
-  const handleSendTestNotification = () => {
-    setTestSent(true);
-    notifyNewArticlePublished({
-      title: 'नेपालमा ताजा विकास: News Paban Subedi प्रत्यक्ष ब्रेकिङ न्युज अलर्ट प्रणाली सक्रिय!',
-      slug: 'main-news-breaking',
-      featured_image: 'https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=600&q=80',
-      is_breaking: true
-    });
-    setTimeout(() => setTestSent(false), 3000);
   };
 
   return (
@@ -253,24 +240,13 @@ export const NotificationBell: React.FC = () => {
               </div>
             </div>
 
-            {/* Test Notification Button */}
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button
-                onClick={handleSendTestNotification}
-                className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                {testSent ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>परीक्षण अलर्ट पठाइयो!</span>
-                  </>
-                ) : (
-                  <>
-                    <BellRing className="w-3.5 h-3.5 text-red-500" />
-                    <span>परीक्षण अलर्ट (Test Notification)</span>
-                  </>
-                )}
-              </button>
+            {/* Real-time status indicator */}
+            <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>प्रत्यक्ष प्रसारण सक्रिय</span>
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono">news.pabansubedi.com.np</span>
             </div>
           </div>
         )}

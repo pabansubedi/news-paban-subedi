@@ -14,7 +14,6 @@ import {
   Menu,
   X,
   Users,
-  Lock,
   Shield,
   LogOut,
   User
@@ -33,7 +32,6 @@ export const Header: React.FC = () => {
     onlineVisitors,
     currentRole,
     currentUser,
-    setAdminLoginModalOpen,
     logoutStaff
   } = useNewsApp();
 
@@ -104,16 +102,8 @@ export const Header: React.FC = () => {
           <div className="flex items-center gap-2 sm:gap-3">
             <NotificationBell />
 
-            {currentRole === 'public' ? (
-              <button
-                onClick={() => setAdminLoginModalOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-amber-300 hover:text-amber-200 transition text-[11px] font-semibold cursor-pointer"
-                title="कर्मचारी तथा सम्पादक लगइन"
-              >
-                <Lock className="w-3 h-3 text-amber-400" />
-                <span>लगइन (Staff)</span>
-              </button>
-            ) : (
+            {/* If logged in as staff/editor/admin, show CMS panel & Logout. For public visitors, login is exclusively in the footer. */}
+            {currentRole !== 'public' && (
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => navigateTo('admin')}
