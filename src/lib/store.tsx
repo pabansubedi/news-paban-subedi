@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import {
   UserProfile,
   Category,
@@ -70,6 +70,101 @@ interface NewsAppContextType {
 }
 
 const NewsAppContext = createContext<NewsAppContextType | undefined>(undefined);
+
+// ---------------------------------------------------------------------------
+// Helpers: DB row <-> app model
+// ---------------------------------------------------------------------------
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (v?: string | null): v is string => !!v && UUID_RE.test(v);
+
+const stripNulls = (obj: Record<string, any>) =>
+  Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== null && v !== undefined));
+
+const mapCategory = (c: any): Category => ({
+  id: c.id,
+  name: c.name || c.name_np || c.slug,
+  name_en: c.name_en || c.slug,
+  slug: c.slug,
+  order_index: c.order_index ?? 0,
+  color: c.color || c.color_code || '#dc2626',
+  description: c.description || '',
+  is_active: c.is_active ?? true
+});
+
+const mapPost = (p: any): Post => ({
+  id: p.id,
+  title: p.title,
+  slug: p.slug,
+  content: p.content,
+  excerpt: p.excerpt || p.summary || '',
+  featured_image: p.featured_image,
+  image_caption: p.image_caption || '',
+  category_id: p.category_id,
+  author_id: p.author_id || 'usr_super_admin',
+  author_name: p.author_name || 'पवन सुवेदी',
+  author_avatar: p.author_avatar || '',
+  editor_name: p.editor_name || '',
+  status: p.status || 'published',
+  views: Number(p.views) || 0,
+  is_breaking: !!p.is_breaking,
+  is_featured: !!p.is_featured,
+  published_at: p.published_at,
+  created_at: p.created_at || new Date().toISOString(),
+  updated_at: p.updated_at || new Date().toISOString(),
+  read_time_mins: p.read_time_mins || 3,
+  tags: p.tags || [],
+  audio_url: p.audio_url || ''
+});
+
+const mapComment = (c: any): Comment => ({
+  id: c.id,
+  post_id: c.post_id,
+  author_name: c.author_name,
+  content: c.content,
+  created_at: c.created_at,
+  is_approved: c.is_approved ?? true
+});
+
+const mapAd = (a: any): Advertisement => ({
+  id: a.id,
+  placement_slot: a.placement_slot,
+  title: a.title || '',
+  image_url: a.image_url || '',
+  redirect_url: a.redirect_url || '',
+  script_code: a.script_code || '',
+  is_active: a.is_active ?? true,
+  start_date: a.start_date ? String(a.start_date).slice(0, 10) : '',
+  end_date: a.end_date ? String(a.end_date).slice(0, 10) : '',
+  views_count: Number(a.views_count) || 0,
+  clicks_count: Number(a.clicks_count) || 0,
+  advertiser_name: a.advertiser_name || ''
+});
+
+// Start from the 5 default slots, override each slot with what is saved in the DB
+const mergeAds = (rows: any[]): Advertisement[] => {
+  const bySlot = new Map<string, Advertisement>();
+  INITIAL_ADS.forEach((a) => bySlot.set(a.placement_slot, a));
+  rows.forEach((r) => bySlot.set(r.placement_slot, mapAd(r)));
+  return Array.from(bySlot.values());
+};
+
+// Only real DB columns, and '' dates -> null (empty string breaks timestamptz columns)
+const adRow = (a: Advertisement) => ({
+  placement_slot: a.placement_slot,
+  title: a.title || '',
+  image_url: a.image_url || '',
+  redirect_url: a.redirect_url || '',
+  script_code: a.script_code || '',
+  is_active: a.is_active,
+  start_date: a.start_date || null,
+  end_date: a.end_date || null,
+  advertiser_name: a.advertiser_name || ''
+});
+
+const settingsRow = (s: SiteSettings) => {
+  const { id, updated_at, total_visitors, online_visitors, ...rest } = s as any;
+  return rest;
+};
 
 const GUEST_USER: UserProfile = {
   id: 'guest-public',
@@ -300,344 +395,189 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
-  // Fetch live data from Supabase on start if available
-  useEffect(() => {
-    let isMounted = true;
-    const fetchSupabaseData = async () => {
-      try {
-        // 1. Site Settings
-        const { data: remoteSettings } = await supabase
-          .from('site_settings')
-          .select('*')
-          .limit(1)
-          .maybeSingle();
+  // ---------------------------------------------------------------------------
+  // SUPABASE = SINGLE SOURCE OF TRUTH
+  // Every browser reads the same data from Supabase (on load, on focus, every
+  // 15s, and instantly via Realtime). LocalStorage is only a fast first-paint cache.
+  // ---------------------------------------------------------------------------
+  const postsRef = useRef<Post[]>(posts);
+  postsRef.current = posts;
+  const categoriesRef = useRef<Category[]>(categories);
+  categoriesRef.current = categories;
+  const adsRef = useRef<Advertisement[]>(ads);
+  adsRef.current = ads;
+  const settingsRef = useRef<SiteSettings>(siteSettings);
+  settingsRef.current = siteSettings;
 
-        if (isMounted && remoteSettings && remoteSettings.site_title) {
+  const inflightRef = useRef(0); // DB writes in progress
+  const adTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const syncingRef = useRef(false);
+  const pendingSyncRef = useRef(false);
+
+  const isBusy = () => inflightRef.current > 0 || Object.keys(adTimersRef.current).length > 0;
+
+  const persist = (key: string, value: unknown) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      console.warn('LocalStorage write error', e);
+    }
+  };
+
+  const syncFromSupabase = useCallback(async () => {
+    if (syncingRef.current) {
+      pendingSyncRef.current = true;
+      return;
+    }
+    syncingRef.current = true;
+    try {
+      do {
+        pendingSyncRef.current = false;
+        const [s, c, p, a, cm] = await Promise.all([
+          supabase.from('site_settings').select('*').limit(1).maybeSingle(),
+          supabase.from('categories').select('*').order('order_index', { ascending: true }),
+          supabase.from('posts').select('*').order('created_at', { ascending: false }),
+          supabase.from('advertisements').select('*'),
+          supabase.from('comments').select('*').order('created_at', { ascending: false })
+        ]);
+
+        // A write is in progress: its completion will trigger a fresh sync, so
+        // don't let this (older) snapshot overwrite the admin's newest change.
+        if (isBusy()) return;
+
+        if (!s.error && s.data && s.data.site_title) {
+          const clean = stripNulls(s.data);
           setSiteSettings((prev) => {
-            const merged = { ...prev, ...remoteSettings };
-            try {
-              localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
-            } catch {}
+            const merged = { ...prev, ...clean };
+            persist(SETTINGS_KEY, merged);
             return merged;
           });
-        }
+        } else if (s.error) console.warn('site_settings fetch failed:', s.error.message);
 
-        // 2. Categories
-        const { data: remoteCategories } = await supabase
-          .from('categories')
-          .select('*')
-          .order('order_index', { ascending: true });
-
-        if (isMounted && remoteCategories && remoteCategories.length > 0) {
-          const formatted: Category[] = remoteCategories.map((c: any) => ({
-            id: c.id,
-            name: c.name || c.name_np || c.slug,
-            name_en: c.name_en || c.slug,
-            slug: c.slug,
-            order_index: c.order_index ?? 0,
-            color: c.color || c.color_code || '#dc2626',
-            description: c.description || '',
-            is_active: c.is_active ?? true
-          }));
+        if (!c.error && c.data && c.data.length > 0) {
+          const formatted = c.data.map(mapCategory);
           setCategories(formatted);
-          try {
-            localStorage.setItem(CATEGORIES_KEY, JSON.stringify(formatted));
-          } catch {}
+          persist(CATEGORIES_KEY, formatted);
+        } else if (c.error) console.warn('categories fetch failed:', c.error.message);
+
+        // Posts: the database is the truth, even when it is empty
+        // (so a deleted post disappears from every browser).
+        if (!p.error && p.data) {
+          const formatted = p.data.map(mapPost);
+          setPosts(formatted);
+          persist(POSTS_KEY, formatted);
+        } else if (p.error) console.warn('posts fetch failed:', p.error.message);
+
+        if (!a.error && a.data) {
+          const merged = mergeAds(a.data);
+          setAds(merged);
+          persist(ADS_KEY, merged);
+        } else if (a.error) console.warn('advertisements fetch failed:', a.error.message);
+
+        if (!cm.error && cm.data && cm.data.length > 0) {
+          const formatted = cm.data.map(mapComment);
+          setComments(formatted);
+          persist(COMMENTS_KEY, formatted);
         }
+      } while (pendingSyncRef.current);
+    } catch (err) {
+      console.warn('Supabase sync failed:', err);
+    } finally {
+      syncingRef.current = false;
+    }
+  }, []);
 
-        // 3. Posts
-        const { data: remotePosts } = await supabase
-          .from('posts')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (isMounted && remotePosts && remotePosts.length > 0) {
-          const formattedPosts: Post[] = remotePosts.map((p: any) => ({
-            id: p.id,
-            title: p.title,
-            slug: p.slug,
-            content: p.content,
-            excerpt: p.excerpt || p.summary || '',
-            featured_image: p.featured_image,
-            image_caption: p.image_caption || '',
-            category_id: p.category_id,
-            author_id: p.author_id || 'usr_super_admin',
-            author_name: p.author_name || 'पवन सुवेदी',
-            author_avatar: p.author_avatar || '',
-            editor_name: p.editor_name || '',
-            status: p.status || 'published',
-            views: Number(p.views) || 0,
-            is_breaking: !!p.is_breaking,
-            is_featured: !!p.is_featured,
-            published_at: p.published_at,
-            created_at: p.created_at || new Date().toISOString(),
-            updated_at: p.updated_at || new Date().toISOString(),
-            read_time_mins: p.read_time_mins || 3,
-            tags: p.tags || [],
-            audio_url: p.audio_url || ''
-          }));
-          setPosts(formattedPosts);
-          try {
-            localStorage.setItem(POSTS_KEY, JSON.stringify(formattedPosts));
-          } catch {}
-        }
-
-        // 4. Advertisements
-        const { data: remoteAds } = await supabase
-          .from('advertisements')
-          .select('*');
-
-        if (isMounted && remoteAds && remoteAds.length > 0) {
-          setAds(remoteAds);
-          try {
-            localStorage.setItem(ADS_KEY, JSON.stringify(remoteAds));
-          } catch {}
-        }
-      } catch (err) {
-        console.warn('Supabase initial fetch gracefully bypassed:', err);
-      }
+  // Sync on load, when the tab becomes visible/focused again, when the network
+  // comes back, and every 15 seconds as a safety net.
+  useEffect(() => {
+    syncFromSupabase();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') syncFromSupabase();
     };
-
-    fetchSupabaseData();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    window.addEventListener('online', onVisible);
+    const poll = setInterval(onVisible, 15000);
     return () => {
-      isMounted = false;
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+      window.removeEventListener('online', onVisible);
+      clearInterval(poll);
     };
-  }, []);
+  }, [syncFromSupabase]);
 
-  // Multi-tab instant sync via BroadcastChannel
+  // Supabase Realtime: any change in any table => refetch (debounced).
   useEffect(() => {
-    if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(syncFromSupabase, 400);
+    };
+    let channel: ReturnType<typeof supabase.channel> | null = null;
     try {
-      const bc = new BroadcastChannel('news_paban_sync_channel');
-      bc.onmessage = (event) => {
-        const { type, payload } = event.data || {};
-        if (type === 'SITE_SETTINGS' && payload) {
-          setSiteSettings(payload);
-        } else if (type === 'CATEGORIES' && payload) {
-          setCategories(payload);
-        } else if (type === 'POSTS' && payload) {
-          setPosts(payload);
-        } else if (type === 'ADS' && payload) {
-          setAds(payload);
-        } else if (type === 'NEW_ARTICLE_BROADCAST' && payload) {
-          notifyNewArticlePublished(payload);
-        }
-      };
-      return () => {
-        bc.close();
-      };
-    } catch {}
-  }, []);
-
-  // Live Supabase Realtime changes listener (100% full-duplex sync for all visitors)
-  useEffect(() => {
-    try {
-      const channel = supabase
-        .channel('news_paban_realtime_stream')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'site_settings' }, (payload) => {
-          if (payload.new && (payload.new as any).site_title) {
-            setSiteSettings((prev) => {
-              const updated = { ...prev, ...(payload.new as any) };
-              try {
-                localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
-              } catch {}
-              return updated;
-            });
-          }
-        })
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, (payload) => {
+      channel = supabase
+        .channel('news_paban_db_changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'site_settings' }, schedule)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, schedule)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'advertisements' }, schedule)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, schedule)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, (payload) => {
+          // Push alert for readers when a post newly goes live
           const p = payload.new as any;
-          if (p && p.id) {
-            const formatted: Post = {
-              id: p.id,
+          if (
+            (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') &&
+            p?.status === 'published' &&
+            !postsRef.current.some((x) => x.slug === p.slug && x.status === 'published')
+          ) {
+            notifyNewArticlePublished({
               title: p.title,
               slug: p.slug,
-              content: p.content,
-              excerpt: p.excerpt || p.summary || '',
               featured_image: p.featured_image,
-              image_caption: p.image_caption || '',
-              category_id: p.category_id,
-              author_id: p.author_id || 'usr_super_admin',
-              author_name: p.author_name || 'पवन सुवेदी',
-              author_avatar: p.author_avatar || '',
-              editor_name: p.editor_name || '',
-              status: p.status || 'published',
-              views: Number(p.views) || 0,
-              is_breaking: !!p.is_breaking,
-              is_featured: !!p.is_featured,
-              published_at: p.published_at,
-              created_at: p.created_at || new Date().toISOString(),
-              updated_at: p.updated_at || new Date().toISOString(),
-              read_time_mins: p.read_time_mins || 3,
-              tags: p.tags || [],
-              audio_url: p.audio_url || ''
-            };
-
-            setPosts((prev) => {
-              if (prev.some((x) => x.id === formatted.id || x.slug === formatted.slug)) {
-                return prev.map((x) => (x.id === formatted.id || x.slug === formatted.slug ? formatted : x));
-              }
-              return [formatted, ...prev];
+              is_breaking: !!p.is_breaking
             });
-
-            if (formatted.status === 'published') {
-              notifyNewArticlePublished({
-                title: formatted.title,
-                slug: formatted.slug,
-                featured_image: formatted.featured_image,
-                is_breaking: formatted.is_breaking
-              });
-            }
           }
-        })
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'posts' }, (payload) => {
-          const p = payload.new as any;
-          if (p && p.id) {
-            setPosts((prev) =>
-              prev.map((item) => {
-                if (item.id === p.id || item.slug === p.slug) {
-                  const updatedItem = { ...item, ...p };
-                  if (p.status === 'published' && item.status !== 'published') {
-                    notifyNewArticlePublished({
-                      title: updatedItem.title,
-                      slug: updatedItem.slug,
-                      featured_image: updatedItem.featured_image,
-                      is_breaking: updatedItem.is_breaking
-                    });
-                  }
-                  return updatedItem;
-                }
-                return item;
-              })
-            );
-          }
-        })
-        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'posts' }, (payload) => {
-          const old = payload.old as any;
-          if (old && (old.id || old.slug)) {
-            setPosts((prev) => prev.filter((item) => item.id !== old.id && item.slug !== old.slug));
-          }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, async () => {
-          try {
-            const { data } = await supabase.from('categories').select('*').order('order_index', { ascending: true });
-            if (data && data.length > 0) {
-              const formatted: Category[] = data.map((c: any) => ({
-                id: c.id,
-                name: c.name || c.name_np || c.slug,
-                name_en: c.name_en || c.slug,
-                slug: c.slug,
-                order_index: c.order_index ?? 0,
-                color: c.color || c.color_code || '#dc2626',
-                description: c.description || '',
-                is_active: c.is_active ?? true
-              }));
-              setCategories(formatted);
-            }
-          } catch {}
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'advertisements' }, (payload) => {
-          if (payload.new && (payload.new as any).id) {
-            const newAd = payload.new as any;
-            setAds((prev) => prev.map((ad) => (ad.id === newAd.id ? { ...ad, ...newAd } : ad)));
-          }
+          schedule();
         })
         .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
-    } catch {}
-  }, []);
-
-  // 2. Multi-browser & Multi-device Global Realtime Broadcast via Supabase
-  useEffect(() => {
-    let globalBus: any = null;
-    try {
-      globalBus = supabase.channel('news_paban_global_bus', {
-        config: { broadcast: { self: false } }
-      });
-
-      globalBus
-        .on('broadcast', { event: 'GLOBAL_SYNC' }, (event: any) => {
-          const { type, data } = event.payload || {};
-          if (type === 'SITE_SETTINGS' && data) {
-            setSiteSettings((prev) => {
-              const updated = { ...prev, ...data };
-              try {
-                localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
-              } catch {}
-              return updated;
-            });
-          } else if (type === 'POSTS' && data) {
-            setPosts(data);
-            try {
-              localStorage.setItem(POSTS_KEY, JSON.stringify(data));
-            } catch {}
-          } else if (type === 'CATEGORIES' && data) {
-            setCategories(data);
-            try {
-              localStorage.setItem(CATEGORIES_KEY, JSON.stringify(data));
-            } catch {}
-          } else if (type === 'NEW_ARTICLE_BROADCAST' && data) {
-            notifyNewArticlePublished(data);
-          }
-        })
-        .subscribe();
-    } catch {}
-
-    // 3. Fallback background sync (every 5 seconds) to guarantee 100% real-time cross-browser sync
-    const pollInterval = setInterval(async () => {
-      try {
-        const { data: remoteSettings } = await supabase
-          .from('site_settings')
-          .select('*')
-          .limit(1)
-          .maybeSingle();
-
-        if (remoteSettings && remoteSettings.site_title) {
-          setSiteSettings((prev) => {
-            if (remoteSettings.updated_at && remoteSettings.updated_at !== prev.updated_at) {
-              const merged = { ...prev, ...remoteSettings };
-              try {
-                localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
-              } catch {}
-              return merged;
-            }
-            return prev;
-          });
-        }
-      } catch {}
-    }, 5000);
-
+    } catch (e) {
+      console.warn('Realtime subscribe failed (polling still active):', e);
+    }
     return () => {
-      clearInterval(pollInterval);
-      if (globalBus) {
-        supabase.removeChannel(globalBus);
-      }
+      if (timer) clearTimeout(timer);
+      if (channel) supabase.removeChannel(channel);
     };
-  }, []);
+  }, [syncFromSupabase]);
 
-  // Broadcast helper function for instant multi-tab & multi-browser sync
-  const broadcastUpdate = (type: string, payload: any) => {
-    // A. Same-browser tabs
+  // Runs a DB write, REPORTS failures (they used to be swallowed silently),
+  // and re-syncs from the database when all writes have finished.
+  const dbWrite = async (label: string, fn: () => PromiseLike<any>) => {
+    inflightRef.current++;
     try {
-      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-        const bc = new BroadcastChannel('news_paban_sync_channel');
-        bc.postMessage({ type, payload });
-        bc.close();
-      }
-    } catch {}
+      const res: any = await fn();
+      if (res?.error) throw res.error;
+      return true;
+    } catch (e: any) {
+      const msg = e?.message || e?.details || String(e);
+      console.error(`[Supabase] ${label} failed:`, e);
+      window.dispatchEvent(
+        new CustomEvent('news-sync-error', {
+          detail: `"${label}" Supabase मा save भएन: ${msg}`
+        })
+      );
+      return false;
+    } finally {
+      inflightRef.current--;
+      if (!isBusy()) syncFromSupabase();
+    }
+  };
 
-    // B. Worldwide cross-browser and cross-device sync via Supabase Realtime
-    try {
-      const bus = supabase.channel('news_paban_global_bus');
-      bus.send({
-        type: 'broadcast',
-        event: 'GLOBAL_SYNC',
-        payload: { type, data: payload }
-      });
-    } catch {}
+  // Local category ids (e.g. "cat-123") are not UUIDs; find the real DB id by slug.
+  const resolveCategoryUuid = async (localId: string): Promise<string | null> => {
+    if (isUuid(localId)) return localId;
+    const cat = categoriesRef.current.find((c) => c.id === localId);
+    if (!cat) return null;
+    const { data } = await supabase.from('categories').select('id').eq('slug', cat.slug).maybeSingle();
+    return data?.id ?? null;
   };
 
   const incrementTotalVisitors = () => {
@@ -755,119 +695,115 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  // Safe background Supabase executor
-  const safeSupabaseCall = async (fn: () => PromiseLike<any>) => {
-    try {
-      await fn();
-    } catch {}
-  };
-
-  // Site Settings (Synced to Supabase public.site_settings)
+  // Site Settings (synced to Supabase public.site_settings)
   const updateSiteSettings = (newSettings: Partial<SiteSettings>) => {
-    setSiteSettings((prev) => {
-      const updated = { ...prev, ...newSettings };
-      try {
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
-      } catch (e) {
-        console.warn('LocalStorage settings write error', e);
-      }
+    const updated = { ...settingsRef.current, ...newSettings };
+    settingsRef.current = updated;
+    setSiteSettings(updated);
+    persist(SETTINGS_KEY, updated);
 
-      // Instant broadcast to all open reader tabs
-      broadcastUpdate('SITE_SETTINGS', updated);
-
-      // Sync seamlessly to Supabase
-      safeSupabaseCall(async () => {
-        await supabase.from('site_settings').upsert({
-          ...updated,
-          id: '00000000-0000-0000-0000-000000000001',
-          updated_at: new Date().toISOString()
-        });
-      });
-
-      return updated;
-    });
+    dbWrite('Site settings', () =>
+      supabase.from('site_settings').upsert({
+        ...settingsRow(updated),
+        id: '00000000-0000-0000-0000-000000000001',
+        updated_at: new Date().toISOString()
+      })
+    );
   };
 
-  // Categories (Synced to Supabase public.categories)
+  // Categories (synced to Supabase public.categories)
+  const categoryRow = (c: Category) => ({
+    name: c.name,
+    name_np: c.name,
+    name_en: c.name_en,
+    slug: c.slug,
+    color: c.color || '#dc2626',
+    color_code: c.color || '#dc2626',
+    description: c.description || '',
+    is_active: c.is_active,
+    order_index: c.order_index
+  });
+
   const addCategory = (cat: Omit<Category, 'id'>) => {
-    const newCategory: Category = {
-      ...cat,
-      id: `cat-${Date.now()}`
-    };
-    const updated = [...categories, newCategory];
+    const newCategory: Category = { ...cat, id: `cat-${Date.now()}` };
+    const updated = [...categoriesRef.current, newCategory];
+    categoriesRef.current = updated;
     setCategories(updated);
-    try {
-      localStorage.setItem(CATEGORIES_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage write error', e);
-    }
+    persist(CATEGORIES_KEY, updated);
 
-    broadcastUpdate('CATEGORIES', updated);
-
-    safeSupabaseCall(async () => {
-      await supabase.from('categories').upsert({
-        name: newCategory.name,
-        name_np: newCategory.name,
-        name_en: newCategory.name_en,
-        slug: newCategory.slug,
-        color: newCategory.color || '#dc2626',
-        color_code: newCategory.color || '#dc2626',
-        description: newCategory.description || '',
-        is_active: newCategory.is_active,
-        order_index: newCategory.order_index
-      }, { onConflict: 'slug' });
-    });
+    dbWrite('Category add', () =>
+      supabase.from('categories').upsert(categoryRow(newCategory), { onConflict: 'slug' })
+    );
   };
 
   const updateCategory = (id: string, updatedFields: Partial<Category>) => {
-    const updated = categories.map((cat) => (cat.id === id ? { ...cat, ...updatedFields } : cat));
+    const previous = categoriesRef.current.find((c) => c.id === id);
+    const updated = categoriesRef.current.map((cat) => (cat.id === id ? { ...cat, ...updatedFields } : cat));
+    categoriesRef.current = updated;
     setCategories(updated);
-    try {
-      localStorage.setItem(CATEGORIES_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage write error', e);
-    }
-
-    broadcastUpdate('CATEGORIES', updated);
+    persist(CATEGORIES_KEY, updated);
 
     const target = updated.find((c) => c.id === id);
     if (target) {
-      safeSupabaseCall(async () => {
-        await supabase.from('categories').upsert({
-          name: target.name,
-          name_np: target.name,
-          name_en: target.name_en,
-          slug: target.slug,
-          color: target.color || '#dc2626',
-          color_code: target.color || '#dc2626',
-          description: target.description || '',
-          is_active: target.is_active,
-          order_index: target.order_index
-        }, { onConflict: 'slug' });
-      });
+      dbWrite('Category update', () =>
+        // if the slug was renamed, update the old row instead of creating a duplicate
+        previous && previous.slug !== target.slug
+          ? supabase.from('categories').update(categoryRow(target)).eq('slug', previous.slug)
+          : supabase.from('categories').upsert(categoryRow(target), { onConflict: 'slug' })
+      );
     }
   };
 
   const deleteCategory = (id: string) => {
-    const target = categories.find((c) => c.id === id);
-    const updated = categories.filter((cat) => cat.id !== id);
+    const target = categoriesRef.current.find((c) => c.id === id);
+    const updated = categoriesRef.current.filter((cat) => cat.id !== id);
+    categoriesRef.current = updated;
     setCategories(updated);
-    try {
-      localStorage.setItem(CATEGORIES_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage write error', e);
-    }
-
-    broadcastUpdate('CATEGORIES', updated);
+    persist(CATEGORIES_KEY, updated);
 
     if (target) {
-      safeSupabaseCall(async () => {
-        await supabase.from('categories').delete().eq('slug', target.slug);
-      });
+      dbWrite('Category delete', () => supabase.from('categories').delete().eq('slug', target.slug));
     }
   };
 
-  // Posts (Synced to Supabase public.posts)
+  // Posts (synced to Supabase public.posts)
+  const postRow = async (p: Post) => ({
+    title: p.title,
+    slug: p.slug,
+    content: p.content,
+    excerpt: p.excerpt,
+    summary: p.excerpt,
+    featured_image: p.featured_image || '',
+    image_caption: p.image_caption || '',
+    category_id: await resolveCategoryUuid(p.category_id), // was missing before -> category lost in other browsers
+    author_name: p.author_name || 'पवन सुवेदी',
+    author_avatar: p.author_avatar || null,
+    editor_name: p.editor_name || '',
+    status: p.status,
+    is_breaking: p.is_breaking,
+    is_featured: p.is_featured,
+    published_at: p.published_at,
+    read_time_mins: p.read_time_mins,
+    tags: p.tags || [],
+    audio_url: p.audio_url || null
+  });
+
+  const savePost = (label: string, p: Post, oldSlug?: string) =>
+    dbWrite(label, async () => {
+      const row = await postRow(p);
+      return oldSlug && oldSlug !== p.slug
+        ? supabase.from('posts').update(row).eq('slug', oldSlug) // slug renamed: don't create a duplicate
+        : supabase.from('posts').upsert(row, { onConflict: 'slug' });
+    });
+
+  const announce = (p: Post) =>
+    notifyNewArticlePublished({
+      title: p.title,
+      slug: p.slug,
+      featured_image: p.featured_image,
+      is_breaking: p.is_breaking
+    });
+
   const addPost = (postData: Omit<Post, 'id' | 'views' | 'created_at' | 'updated_at'>): Post => {
     const nowIso = new Date().toISOString();
     const newPost: Post = {
@@ -878,258 +814,159 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updated_at: nowIso,
       published_at: postData.status === 'published' ? nowIso : null
     };
-    const updated = [newPost, ...posts];
+    const updated = [newPost, ...postsRef.current];
+    postsRef.current = updated;
     setPosts(updated);
-    try {
-      localStorage.setItem(POSTS_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage write error', e);
-    }
+    persist(POSTS_KEY, updated);
 
-    broadcastUpdate('POSTS', updated);
-
-    // Instant push alert to all readers if published or breaking
-    if (newPost.status === 'published') {
-      notifyNewArticlePublished({
-        title: newPost.title,
-        slug: newPost.slug,
-        featured_image: newPost.featured_image,
-        is_breaking: newPost.is_breaking
-      });
-      broadcastUpdate('NEW_ARTICLE_BROADCAST', {
-        title: newPost.title,
-        slug: newPost.slug,
-        featured_image: newPost.featured_image,
-        is_breaking: newPost.is_breaking
-      });
-    }
-
-    safeSupabaseCall(async () => {
-      await supabase.from('posts').upsert({
-        title: newPost.title,
-        slug: newPost.slug,
-        content: newPost.content,
-        excerpt: newPost.excerpt,
-        summary: newPost.excerpt,
-        featured_image: newPost.featured_image,
-        image_caption: newPost.image_caption || '',
-        author_name: newPost.author_name || 'पवन सुवेदी',
-        status: newPost.status,
-        views: newPost.views,
-        is_breaking: newPost.is_breaking,
-        is_featured: newPost.is_featured,
-        published_at: newPost.published_at,
-        read_time_mins: newPost.read_time_mins,
-        tags: newPost.tags || []
-      }, { onConflict: 'slug' });
-    });
-
+    if (newPost.status === 'published') announce(newPost);
+    savePost('Post save', newPost);
     return newPost;
   };
 
   const updatePost = (id: string, fields: Partial<Post>) => {
-    let updatedTarget: Post | null = null;
-    const updated = posts.map((p) => {
-      if (p.id === id) {
-        const nowIso = new Date().toISOString();
-        const willPublish = fields.status === 'published' && p.status !== 'published';
-        const modified = {
-          ...p,
-          ...fields,
-          updated_at: nowIso,
-          published_at: willPublish ? nowIso : fields.published_at !== undefined ? fields.published_at : p.published_at
-        };
-        updatedTarget = modified;
-        return modified;
-      }
-      return p;
-    });
+    const previous = postsRef.current.find((p) => p.id === id);
+    if (!previous) return;
+    const nowIso = new Date().toISOString();
+    const willPublish = fields.status === 'published' && previous.status !== 'published';
+    const modified: Post = {
+      ...previous,
+      ...fields,
+      updated_at: nowIso,
+      published_at: willPublish ? nowIso : fields.published_at !== undefined ? fields.published_at : previous.published_at
+    };
+    const updated = postsRef.current.map((p) => (p.id === id ? modified : p));
+    postsRef.current = updated;
     setPosts(updated);
-    try {
-      localStorage.setItem(POSTS_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage write error', e);
+    persist(POSTS_KEY, updated);
+
+    if (fields.status === 'published' || (modified.status === 'published' && fields.is_breaking)) {
+      announce(modified);
     }
-
-    broadcastUpdate('POSTS', updated);
-
-    if (updatedTarget) {
-      const p: Post = updatedTarget;
-
-      if (fields.status === 'published' || (p.status === 'published' && fields.is_breaking)) {
-        notifyNewArticlePublished({
-          title: p.title,
-          slug: p.slug,
-          featured_image: p.featured_image,
-          is_breaking: p.is_breaking
-        });
-        broadcastUpdate('NEW_ARTICLE_BROADCAST', {
-          title: p.title,
-          slug: p.slug,
-          featured_image: p.featured_image,
-          is_breaking: p.is_breaking
-        });
-      }
-
-      safeSupabaseCall(async () => {
-        await supabase.from('posts').upsert({
-          title: p.title,
-          slug: p.slug,
-          content: p.content,
-          excerpt: p.excerpt,
-          summary: p.excerpt,
-          featured_image: p.featured_image,
-          image_caption: p.image_caption || '',
-          author_name: p.author_name || 'पवन सुवेदी',
-          editor_name: p.editor_name || '',
-          status: p.status,
-          views: p.views,
-          is_breaking: p.is_breaking,
-          is_featured: p.is_featured,
-          published_at: p.published_at,
-          read_time_mins: p.read_time_mins,
-          tags: p.tags || []
-        }, { onConflict: 'slug' });
-      });
-    }
+    savePost('Post update', modified, previous.slug);
   };
 
   const deletePost = (id: string) => {
-    const target = posts.find((p) => p.id === id);
-    const updated = posts.filter((p) => p.id !== id);
+    const target = postsRef.current.find((p) => p.id === id);
+    const updated = postsRef.current.filter((p) => p.id !== id);
+    postsRef.current = updated;
     setPosts(updated);
-    try {
-      localStorage.setItem(POSTS_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage write error', e);
-    }
-
-    broadcastUpdate('POSTS', updated);
+    persist(POSTS_KEY, updated);
 
     if (target) {
-      safeSupabaseCall(async () => {
-        await supabase.from('posts').delete().eq('slug', target.slug);
-      });
+      dbWrite('Post delete', () => supabase.from('posts').delete().eq('slug', target.slug));
     }
   };
 
   const changePostStatus = (id: string, status: PostStatus, approverName?: string) => {
+    const previous = postsRef.current.find((p) => p.id === id);
+    if (!previous) return;
     const nowIso = new Date().toISOString();
-    let updatedTarget: Post | null = null;
-    const updated = posts.map((p) => {
-      if (p.id === id) {
-        const modified = {
-          ...p,
-          status,
-          editor_name: approverName || p.editor_name || currentUser.full_name,
-          published_at: status === 'published' ? (p.published_at || nowIso) : null,
-          updated_at: nowIso
-        };
-        updatedTarget = modified;
-        return modified;
-      }
-      return p;
-    });
+    const modified: Post = {
+      ...previous,
+      status,
+      editor_name: approverName || previous.editor_name || currentUser.full_name,
+      published_at: status === 'published' ? previous.published_at || nowIso : null,
+      updated_at: nowIso
+    };
+    const updated = postsRef.current.map((p) => (p.id === id ? modified : p));
+    postsRef.current = updated;
     setPosts(updated);
-    try {
-      localStorage.setItem(POSTS_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage write error', e);
-    }
+    persist(POSTS_KEY, updated);
 
-    broadcastUpdate('POSTS', updated);
+    if (status === 'published') announce(modified);
 
-    if (updatedTarget) {
-      const p: Post = updatedTarget;
-
-      // When editor approves and publishes an article, trigger push alert to all readers
-      if (status === 'published') {
-        notifyNewArticlePublished({
-          title: p.title,
-          slug: p.slug,
-          featured_image: p.featured_image,
-          is_breaking: p.is_breaking
-        });
-        broadcastUpdate('NEW_ARTICLE_BROADCAST', {
-          title: p.title,
-          slug: p.slug,
-          featured_image: p.featured_image,
-          is_breaking: p.is_breaking
-        });
-      }
-
-      safeSupabaseCall(async () => {
-        await supabase.from('posts').update({
-          status: p.status,
-          editor_name: p.editor_name,
-          published_at: p.published_at,
-          updated_at: p.updated_at
-        }).eq('slug', p.slug);
-      });
-    }
+    dbWrite('Post status', () =>
+      supabase
+        .from('posts')
+        .update({
+          status: modified.status,
+          editor_name: modified.editor_name,
+          published_at: modified.published_at,
+          updated_at: modified.updated_at
+        })
+        .eq('slug', modified.slug)
+    );
   };
 
   const incrementViews = (id: string) => {
-    const target = posts.find((p) => p.id === id);
-    const updated = posts.map((p) => (p.id === id ? { ...p, views: (p.views || 0) + 1 } : p));
+    const target = postsRef.current.find((p) => p.id === id);
+    if (!target) return;
+    const updated = postsRef.current.map((p) => (p.id === id ? { ...p, views: (p.views || 0) + 1 } : p));
+    postsRef.current = updated;
     setPosts(updated);
-    try {
-      localStorage.setItem(POSTS_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage write error', e);
-    }
+    persist(POSTS_KEY, updated);
 
-    if (target) {
-      safeSupabaseCall(async () => {
-        try {
-          await supabase.rpc('increment_post_views', { target_slug: target.slug });
-        } catch {
+    // Silent background counter (no error banner, no re-sync)
+    (async () => {
+      try {
+        const { error } = await supabase.rpc('increment_post_views', { target_slug: target.slug });
+        if (error) {
           await supabase.from('posts').update({ views: (target.views || 0) + 1 }).eq('slug', target.slug);
         }
-      });
-    }
+      } catch {}
+    })();
   };
 
-  // Ads (Synced to Supabase public.advertisements)
-  const updateAd = (id: string, adFields: Partial<Advertisement>) => {
-    const updated = ads.map((ad) => (ad.id === id ? { ...ad, ...adFields } : ad));
-    setAds(updated);
-    try {
-      localStorage.setItem(ADS_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage write error', e);
-    }
+  // Ads (synced to Supabase public.advertisements)
+  // NOTE: default ads have ids like "ad-1" (not UUIDs). The old code upserted that id
+  // into a UUID column, so EVERY ad change failed silently. Now we match by slot.
+  const writeAd = (adId: string) => {
+    const target = adsRef.current.find((a) => a.id === adId);
+    if (!target) return;
+    dbWrite('Advertisement', async () => {
+      const row = adRow(target);
+      if (isUuid(target.id)) {
+        return supabase.from('advertisements').update(row).eq('id', target.id);
+      }
+      const { data: existing, error } = await supabase
+        .from('advertisements')
+        .select('id')
+        .eq('placement_slot', target.placement_slot)
+        .limit(1)
+        .maybeSingle();
+      if (error) return { error };
+      if (existing?.id) return supabase.from('advertisements').update(row).eq('id', existing.id);
+      return supabase
+        .from('advertisements')
+        .insert({ ...row, views_count: target.views_count || 0, clicks_count: target.clicks_count || 0 });
+    });
+  };
 
-    const target = updated.find((a) => a.id === id);
-    if (target) {
-      safeSupabaseCall(async () => {
-        await supabase.from('advertisements').upsert(target);
-      });
-    }
+  const updateAd = (id: string, adFields: Partial<Advertisement>) => {
+    const updated = adsRef.current.map((ad) => (ad.id === id ? { ...ad, ...adFields } : ad));
+    adsRef.current = updated;
+    setAds(updated);
+    persist(ADS_KEY, updated);
+
+    // Debounce: the admin form calls this on every keystroke
+    if (adTimersRef.current[id]) clearTimeout(adTimersRef.current[id]);
+    adTimersRef.current[id] = setTimeout(() => {
+      delete adTimersRef.current[id];
+      writeAd(id);
+    }, 700);
   };
 
   const recordAdClick = (id: string) => {
-    const target = ads.find((a) => a.id === id);
-    const updated = ads.map((ad) => (ad.id === id ? { ...ad, clicks_count: (ad.clicks_count || 0) + 1 } : ad));
+    const target = adsRef.current.find((a) => a.id === id);
+    const updated = adsRef.current.map((ad) => (ad.id === id ? { ...ad, clicks_count: (ad.clicks_count || 0) + 1 } : ad));
+    adsRef.current = updated;
     setAds(updated);
-    try {
-      localStorage.setItem(ADS_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage write error', e);
-    }
+    persist(ADS_KEY, updated);
 
-    if (target) {
-      safeSupabaseCall(async () => {
+    if (target && isUuid(target.id)) {
+      (async () => {
         try {
-          await supabase.rpc('increment_ad_clicks', { target_id: target.id });
-        } catch {
-          await supabase.from('advertisements').update({ clicks_count: (target.clicks_count || 0) + 1 }).eq('id', target.id);
-        }
-      });
+          const { error } = await supabase.rpc('increment_ad_clicks', { target_id: target.id });
+          if (error) {
+            await supabase.from('advertisements').update({ clicks_count: (target.clicks_count || 0) + 1 }).eq('id', target.id);
+          }
+        } catch {}
+      })();
     }
   };
 
-  // Comments (Synced to Supabase public.comments)
+  // Comments (synced to Supabase public.comments)
   const addComment = (postId: string, authorName: string, content: string) => {
     const newComment: Comment = {
       id: `comm-${Date.now()}`,
@@ -1141,20 +978,14 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
     const updated = [newComment, ...comments];
     setComments(updated);
-    try {
-      localStorage.setItem(COMMENTS_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage write error', e);
-    }
+    persist(COMMENTS_KEY, updated);
 
-    safeSupabaseCall(async () => {
-      await supabase.from('comments').insert({
-        post_id: postId,
-        author_name: authorName,
-        content,
-        is_approved: true
-      });
-    });
+    // comments.post_id is a UUID FK, so only real (DB) posts can store comments
+    if (isUuid(postId)) {
+      dbWrite('Comment', () =>
+        supabase.from('comments').insert({ post_id: postId, author_name: authorName, content, is_approved: true })
+      );
+    }
   };
 
   return (

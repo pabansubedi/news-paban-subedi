@@ -3,7 +3,7 @@
  * news.pabansubedi.com.np
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NewsAppProvider, useNewsApp } from './lib/store';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
@@ -11,6 +11,29 @@ import { HomePage } from './components/HomePage';
 import { ArticleDetail } from './components/ArticleDetail';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { DocsView } from './components/DocsView';
+
+/**
+ * Shows a visible warning to logged-in staff when a change could NOT be saved to Supabase
+ * (before, such failures were swallowed silently and other browsers never got the change).
+ */
+const SyncErrorBanner: React.FC = () => {
+  const { currentRole } = useNewsApp();
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => setMessage((e as CustomEvent<string>).detail);
+    window.addEventListener('news-sync-error', handler);
+    return () => window.removeEventListener('news-sync-error', handler);
+  }, []);
+
+  if (!message || currentRole === 'public') return null;
+  return (
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] max-w-xl w-[92%] bg-red-600 text-white text-sm rounded-xl shadow-2xl p-4 flex items-start gap-3">
+      <span className="flex-1 break-words">⚠️ {message}</span>
+      <button onClick={() => setMessage(null)} className="font-bold px-2" aria-label="Close">✕</button>
+    </div>
+  );
+};
 
 const MainLayout: React.FC = () => {
   const { currentRoute, siteSettings, posts, currentRole } = useNewsApp();
@@ -116,6 +139,7 @@ const MainLayout: React.FC = () => {
       </main>
 
       <Footer />
+      <SyncErrorBanner />
     </div>
   );
 };

@@ -282,7 +282,7 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {publishedPosts
-                .filter((p) => p.category_id === 'cat-politics')
+                .filter((p) => p.category_id === categories.find((c) => c.slug === 'politics')?.id)
                 .slice(0, 4)
                 .map((post) => (
                   <article
@@ -333,7 +333,7 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {publishedPosts
-                .filter((p) => p.category_id === 'cat-economy')
+                .filter((p) => p.category_id === categories.find((c) => c.slug === 'economy')?.id)
                 .slice(0, 4)
                 .map((post) => (
                   <article
@@ -384,7 +384,7 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {publishedPosts
-                .filter((p) => p.category_id === 'cat-sports')
+                .filter((p) => p.category_id === categories.find((c) => c.slug === 'sports')?.id)
                 .slice(0, 3)
                 .map((post) => (
                   <article
