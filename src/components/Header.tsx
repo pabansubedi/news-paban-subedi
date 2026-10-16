@@ -115,7 +115,7 @@ export const Header: React.FC = () => {
                 </button>
                 <button
                   onClick={logoutStaff}
-                  className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
+                  className="p-2 sm:p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
                   title="लगआउट गर्नुहोस्"
                 >
                   <LogOut className="w-3.5 h-3.5" />
@@ -125,7 +125,7 @@ export const Header: React.FC = () => {
 
             <button
               onClick={toggleDarkMode}
-              className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer flex items-center gap-1 text-[11px]"
+              className="p-2 sm:p-1 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer flex items-center gap-1 text-[11px]"
               aria-label="Toggle Dark Mode"
               title={isDarkMode ? 'लाइट मोडमा जानुहोस्' : 'डार्क मोडमा जानुहोस्'}
             >

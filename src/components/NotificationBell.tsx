@@ -254,7 +254,7 @@ export const NotificationBell: React.FC = () => {
 
       {/* 3. FLOATING REAL-TIME PUSH TOAST ALERT (TOP-RIGHT CORNER) */}
       {activeToast && (
-        <div className="fixed top-5 right-5 z-50 max-w-sm w-full bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-2xl shadow-2xl border-2 border-red-600 dark:border-red-500 p-4 animate-in slide-in-from-top-4 duration-300 flex flex-col gap-3">
+        <div className="fixed top-4 left-4 right-4 sm:left-auto sm:right-5 z-50 sm:max-w-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-2xl shadow-2xl border-2 border-red-600 dark:border-red-500 p-4 animate-in slide-in-from-top-4 duration-300 flex flex-col gap-3">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2">
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-600 text-white animate-pulse">
@@ -303,7 +303,7 @@ export const NotificationBell: React.FC = () => {
 
       {/* 4. READER PUSH NOTIFICATION SUBSCRIPTION PROMPT BANNER */}
       {showPromptBanner && !settings.enabled && (
-        <div className="fixed bottom-5 right-5 z-40 max-w-sm w-full bg-white dark:bg-slate-900 border-2 border-red-500 rounded-2xl shadow-2xl p-4 text-slate-900 dark:text-white animate-in slide-in-from-bottom-5 duration-300">
+        <div className="fixed bottom-20 left-4 right-4 sm:left-auto sm:right-5 z-40 sm:max-w-sm bg-white dark:bg-slate-900 border-2 border-red-500 rounded-2xl shadow-2xl p-4 text-slate-900 dark:text-white animate-in slide-in-from-bottom-5 duration-300">
           <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-xl bg-red-600 text-white flex items-center justify-center shadow-sm">

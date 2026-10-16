@@ -7,9 +7,9 @@ export interface UserProfile {
   full_name: string;
   email: string;
   avatar: string;
-  password?: string;
   bio?: string;
   phone?: string;
+  is_active?: boolean; // only active staff profiles get any access
 }
 
 export interface Category {
@@ -83,6 +83,7 @@ export interface SiteSettings {
   favicon_url: string;
   watermark_url: string;
   contact_email: string;
+  comments_need_approval?: boolean; // new reader comments stay hidden until a moderator approves
   contact_phone: string;
   office_address: string;
   press_council_reg_no: string;

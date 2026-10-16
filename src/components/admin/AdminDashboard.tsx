@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNewsApp } from '../../lib/store';
 import { Post, PostStatus, AdPlacementSlot, Category, UserProfile } from '../../types';
 import { toNepaliDigits } from '../../lib/nepaliDate';
@@ -17,6 +17,7 @@ import {
   Sliders,
   Megaphone,
   Layers,
+  MessageSquare,
   Settings,
   Database,
   Code2,
@@ -46,6 +47,16 @@ import {
   Radio
 } from 'lucide-react';
 import { notifyNewArticlePublished } from '../../lib/notificationService';
+import { uploadImage } from '../../lib/storage';
+
+// Size every ad slot is designed for (what AdBanner actually renders)
+const AD_SPECS: Record<AdPlacementSlot, { w: number; h: number; where: string; note: string }> = {
+  header_top: { w: 728, h: 90, where: 'Header (सबैभन्दा माथि)', note: 'मोबाइलमा आफैं सानो हुन्छ।' },
+  below_hero: { w: 1200, h: 150, where: 'मुख्य समाचारको मुनि (पूरा चौडाइ)', note: 'किनारा थोरै कटिन सक्छ; मुख्य लेख बीचमा राख्नुहोस्।' },
+  sidebar_top: { w: 300, h: 250, where: 'दायाँ Sidebar माथि', note: 'मोबाइलमा समाचारको तल देखिन्छ।' },
+  in_article: { w: 700, h: 160, where: 'समाचारको भित्र', note: 'अधिकतम उचाइ १६० px।' },
+  sticky_footer: { w: 468, h: 60, where: 'स्क्रिनको तल अडिने पट्टी', note: 'उचाइ ५६ px भित्र देखिन्छ।' }
+};
 
 export const AdminDashboard: React.FC = () => {
   const {
@@ -56,7 +67,11 @@ export const AdminDashboard: React.FC = () => {
     updateUser,
     deleteUser,
     changeUserPassword,
-    posts,
+    sendPasswordReset,
+    allPosts: posts,
+    comments,
+    updateCommentApproval,
+    deleteComment,
     addPost,
     updatePost,
     deletePost,
@@ -72,8 +87,26 @@ export const AdminDashboard: React.FC = () => {
     navigateTo
   } = useNewsApp();
 
-  type AdminTab = 'posts' | 'new_post' | 'ads' | 'categories' | 'staff' | 'settings' | 'notifications' | 'sql_schema' | 'nextjs_code';
+  type AdminTab = 'posts' | 'new_post' | 'ads' | 'categories' | 'comments' | 'staff' | 'settings' | 'notifications' | 'sql_schema' | 'nextjs_code';
   const [activeTab, setActiveTab] = useState<AdminTab>('posts');
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [adSizeNotes, setAdSizeNotes] = useState<Record<string, string>>({});
+  const [postPublishAt, setPostPublishAt] = useState(''); // datetime-local value ('' = publish now)
+  const [commentFilter, setCommentFilter] = useState<'all' | 'pending' | 'approved'>('all');
+  const pendingComments = comments.filter((c) => !c.is_approved).length;
+  // ISO -> value for <input type="datetime-local"> in the editor's own time zone
+  const toLocalInput = (iso: string) => {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  // Server-side RLS enforces the same rules; this just hides what a role cannot use
+  useEffect(() => {
+    const superOnly = ['ads', 'staff', 'settings', 'notifications', 'sql_schema', 'nextjs_code'];
+    if (currentRole !== 'super_admin' && superOnly.includes(activeTab)) setActiveTab('posts');
+    if (currentRole === 'reporter' && (activeTab === 'categories' || activeTab === 'comments')) setActiveTab('posts');
+  }, [currentRole, activeTab]);
 
   // Push notification broadcast state
   const [broadcastHeadline, setBroadcastHeadline] = useState('');
@@ -165,87 +198,137 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  // PC Image Upload to Base64/DataURL simulation for local preview & Supabase bucket
-  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>, target: 'post' | 'logo' | 'logo_dark' | 'favicon' | 'watermark' | string) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        const result = uploadEvent.target?.result as string;
-        if (target === 'post') setPostImage(result);
-        else if (target === 'logo') {
-          setSettingsForm((prev) => ({ ...prev, logo_url: result }));
-          updateSiteSettings({ logo_url: result });
+  // Image upload -> Supabase Storage (public URL is saved, NOT a huge base64 string)
+  const handleImageFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    target: 'post' | 'logo' | 'logo_dark' | 'favicon' | 'watermark' | string
+  ) => {
+    const input = e.target;
+    const file = input.files?.[0];
+    if (!file) return;
+    setUploadingImage(true);
+    try {
+      if (target.startsWith('ad-')) {
+        const adId = target.replace('ad-', '');
+        const target_ad = ads.find((a) => a.id === adId);
+        if (target_ad) {
+          const spec = AD_SPECS[target_ad.placement_slot];
+          const dims = await new Promise<{ w: number; h: number } | null>((resolve) => {
+            const img = new Image();
+            const u = URL.createObjectURL(file);
+            img.onload = () => {
+              URL.revokeObjectURL(u);
+              resolve({ w: img.width, h: img.height });
+            };
+            img.onerror = () => {
+              URL.revokeObjectURL(u);
+              resolve(null);
+            };
+            img.src = u;
+          });
+          if (dims) {
+            const diff = Math.abs(dims.w / dims.h - spec.w / spec.h) / (spec.w / spec.h);
+            setAdSizeNotes((prev) => ({
+              ...prev,
+              [adId]:
+                diff > 0.15
+                  ? `⚠️ तस्बिर ${dims.w}×${dims.h} px छ। यो स्थानको लागि ${spec.w}×${spec.h} px (यस्तै अनुपात) राख्नुहोस्, नत्र किनारा कटिन सक्छ।`
+                  : `✓ साइज ठीक छ (${dims.w}×${dims.h} px)।`
+            }));
+          }
         }
-        else if (target === 'logo_dark') {
-          setSettingsForm((prev) => ({ ...prev, logo_dark_url: result }));
-          updateSiteSettings({ logo_dark_url: result });
-        }
-        else if (target === 'favicon') {
-          setSettingsForm((prev) => ({ ...prev, favicon_url: result }));
-          updateSiteSettings({ favicon_url: result });
-        }
-        else if (target === 'watermark') {
-          setSettingsForm((prev) => ({ ...prev, watermark_url: result }));
-          updateSiteSettings({ watermark_url: result });
-        }
-        else if (target.startsWith('ad-')) {
-          const adId = target.replace('ad-', '');
-          updateAd(adId, { image_url: result });
-        }
-      };
-      reader.readAsDataURL(file);
+      }
+      const bucket = target === 'post' || target.startsWith('ad-') ? 'news-images' : 'branding';
+      const url = await uploadImage(file, bucket);
+      if (target === 'post') setPostImage(url);
+      else if (target === 'logo') {
+        setSettingsForm((prev) => ({ ...prev, logo_url: url }));
+        updateSiteSettings({ logo_url: url });
+      } else if (target === 'logo_dark') {
+        setSettingsForm((prev) => ({ ...prev, logo_dark_url: url }));
+        updateSiteSettings({ logo_dark_url: url });
+      } else if (target === 'favicon') {
+        setSettingsForm((prev) => ({ ...prev, favicon_url: url }));
+        updateSiteSettings({ favicon_url: url });
+      } else if (target === 'watermark') {
+        setSettingsForm((prev) => ({ ...prev, watermark_url: url }));
+        updateSiteSettings({ watermark_url: url });
+      } else if (target.startsWith('ad-')) {
+        updateAd(target.replace('ad-', ''), { image_url: url });
+      }
+    } catch (err: any) {
+      window.dispatchEvent(
+        new CustomEvent('news-sync-error', { detail: `तस्बिर अपलोड भएन: ${err?.message || err}` })
+      );
+    } finally {
+      setUploadingImage(false);
+      input.value = '';
     }
   };
 
-  const handleAddStaff = (e: React.FormEvent) => {
+  const handleAddStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStaffName.trim() || !newStaffEmail.trim() || !newStaffPassword.trim()) {
+    if (!newStaffName.trim() || !newStaffEmail.trim() || !newStaffPassword) {
       alert('कृपया पूरा नाम, इमेल र पासवर्ड अनिवार्य भर्नुहोस्।');
       return;
     }
-    if (newStaffPassword.trim().length < 4) {
-      alert('पासवर्ड कम्तिमा ४ अक्षरको हुनुपर्छ।');
+    if (newStaffPassword.length < 6) {
+      alert('पासवर्ड कम्तिमा ६ अक्षरको हुनुपर्छ।');
       return;
     }
-    addUser({
-      user_id: `usr_${Date.now()}`,
+    const res = await addUser({
       role: newStaffRole,
       full_name: newStaffName.trim(),
       email: newStaffEmail.trim().toLowerCase(),
-      password: newStaffPassword.trim(),
+      password: newStaffPassword,
       phone: newStaffPhone.trim() || undefined,
-      bio: newStaffBio.trim() || undefined,
-      avatar:
-        newStaffRole === 'super_admin'
-          ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'
-          : newStaffRole === 'editor'
-          ? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80'
-          : 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80'
+      bio: newStaffBio.trim() || undefined
     });
-    setStaffSuccessMsg(`नयाँ ${newStaffRole === 'super_admin' ? 'सुपर एडमिन' : newStaffRole === 'editor' ? 'सम्पादक' : 'संवाददाता'} (${newStaffEmail.trim()}) सफलतापुर्वक दर्ता गरियो!`);
+    if (!res.ok) {
+      alert(res.error || 'कर्मचारी थप्न सकिएन।');
+      return;
+    }
+    const roleName = newStaffRole === 'super_admin' ? 'सुपर एडमिन' : newStaffRole === 'editor' ? 'सम्पादक' : 'संवाददाता';
+    setStaffSuccessMsg(
+      `नयाँ ${roleName} (${newStaffEmail.trim()}) दर्ता गरियो!` +
+        (res.needsConfirm ? ' लगइन गर्न उहाँले इमेलमा आएको पुष्टि लिङ्क थिच्नुपर्छ।' : '')
+    );
     setNewStaffName('');
     setNewStaffEmail('');
     setNewStaffPassword('');
     setNewStaffPhone('');
     setNewStaffBio('');
-    setTimeout(() => setStaffSuccessMsg(''), 5000);
+    setTimeout(() => setStaffSuccessMsg(''), 7000);
   };
 
-  const handleSavePasswordChange = (e: React.FormEvent) => {
+  const handleSavePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!passwordModalUser || !newPasswordVal.trim()) return;
-    if (newPasswordVal.trim().length < 4) {
-      alert('पासवर्ड कम्तिमा ४ अक्षरको हुनुपर्छ।');
+    if (!passwordModalUser || !newPasswordVal) return;
+    const res = await changeUserPassword(newPasswordVal);
+    if (!res.ok) {
+      alert(res.error || 'पासवर्ड बदल्न सकिएन।');
       return;
     }
-    changeUserPassword(passwordModalUser.id, newPasswordVal.trim());
-    setPasswordSuccessMsg(`"${passwordModalUser.full_name}" को नयाँ पासवर्ड सफलतापुर्वक सुरक्षित गरियो!`);
+    setPasswordSuccessMsg('तपाईंको नयाँ पासवर्ड सुरक्षित गरियो!');
     setTimeout(() => {
       setPasswordSuccessMsg('');
       setPasswordModalUser(null);
       setNewPasswordVal('');
     }, 1500);
+  };
+
+  const handleSendReset = async () => {
+    if (!passwordModalUser) return;
+    const res = await sendPasswordReset(passwordModalUser.email);
+    if (res.ok) {
+      setPasswordSuccessMsg(`${passwordModalUser.email} मा पासवर्ड रिसेट लिङ्क पठाइयो।`);
+      setTimeout(() => {
+        setPasswordSuccessMsg('');
+        setPasswordModalUser(null);
+      }, 2500);
+    } else {
+      alert(res.error || 'रिसेट इमेल पठाउन सकिएन।');
+    }
   };
 
   const handleSavePost = (submitStatus: PostStatus) => {
@@ -255,6 +338,17 @@ export const AdminDashboard: React.FC = () => {
     }
 
     const tagsArray = postTags.split(',').map((t) => t.trim()).filter(Boolean);
+
+    // publish time: the chosen schedule, else keep an old live time, else NOW
+    let publishAt: string | null = null;
+    if (submitStatus === 'published') {
+      const existing = editingPostId ? posts.find((p) => p.id === editingPostId) : undefined;
+      if (postPublishAt) publishAt = new Date(postPublishAt).toISOString();
+      else if (existing?.status === 'published' && existing.published_at && new Date(existing.published_at).getTime() <= Date.now())
+        publishAt = existing.published_at;
+      else publishAt = new Date().toISOString();
+    }
+    const isScheduled = !!publishAt && new Date(publishAt).getTime() > Date.now();
 
     if (editingPostId) {
       updatePost(editingPostId, {
@@ -269,16 +363,9 @@ export const AdminDashboard: React.FC = () => {
         is_featured: postIsFeatured,
         status: submitStatus,
         tags: tagsArray,
-        editor_name: currentUser.full_name
+        editor_name: currentUser.full_name,
+        ...(submitStatus === 'published' ? { published_at: publishAt } : {})
       });
-      if (submitStatus === 'published') {
-        notifyNewArticlePublished({
-          title: postTitle,
-          slug: postSlug,
-          featured_image: postImage,
-          is_breaking: postIsBreaking
-        });
-      }
       setFormSuccess('समाचार सफलतापूर्वक अपडेट गरियो!');
     } else {
       addPost({
@@ -289,7 +376,7 @@ export const AdminDashboard: React.FC = () => {
         category_id: postCategoryId,
         featured_image: postImage,
         image_caption: postImageCaption,
-        author_id: currentUser.id,
+        author_id: currentUser.user_id,
         author_name: currentUser.full_name,
         author_avatar: currentUser.avatar,
         status: submitStatus,
@@ -297,19 +384,13 @@ export const AdminDashboard: React.FC = () => {
         is_featured: postIsFeatured,
         read_time_mins: Math.ceil(postContent.split(/\s+/).length / 150) || 3,
         tags: tagsArray,
-        published_at: submitStatus === 'published' ? new Date().toISOString() : null
+        published_at: publishAt
       });
-      if (submitStatus === 'published') {
-        notifyNewArticlePublished({
-          title: postTitle,
-          slug: postSlug,
-          featured_image: postImage,
-          is_breaking: postIsBreaking
-        });
-      }
       setFormSuccess(
         submitStatus === 'published'
-          ? 'समाचार प्रत्यक्ष प्रकाशित गरियो!'
+          ? isScheduled
+            ? 'समाचार तोकिएको समयमा प्रकाशित हुने गरी सुरक्षित गरियो!'
+            : 'समाचार प्रत्यक्ष प्रकाशित गरियो!'
           : submitStatus === 'pending'
           ? 'समाचार समीक्षा (Review) का लागि पठाइयो!'
           : 'समाचार ड्राफ्टका रूपमा सुरक्षित गरियो!'
@@ -332,6 +413,9 @@ export const AdminDashboard: React.FC = () => {
     setPostImageCaption('');
     setPostIsBreaking(false);
     setPostIsFeatured(false);
+    setPostTags('');
+    setPostPublishAt('');
+    setPostImage('https://images.unsplash.com/photo-1585829365295-ab7cd400c167?auto=format&fit=crop&w=1200&q=80');
   };
 
   const handleEditClick = (post: Post) => {
@@ -346,6 +430,11 @@ export const AdminDashboard: React.FC = () => {
     setPostIsBreaking(post.is_breaking);
     setPostIsFeatured(post.is_featured);
     setPostTags(post.tags?.join(', ') || '');
+    setPostPublishAt(
+      post.status === 'published' && post.published_at && new Date(post.published_at).getTime() > Date.now()
+        ? toLocalInput(post.published_at)
+        : ''
+    );
     setActiveTab('new_post');
   };
 
@@ -377,6 +466,11 @@ export const AdminDashboard: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
+      {uploadingImage && (
+        <div className="fixed top-4 right-4 z-[9999] bg-slate-900 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-2xl border border-slate-700">
+          ⏳ तस्बिर अपलोड हुँदैछ...
+        </div>
+      )}
       {/* Top Banner / Role Status */}
       <div className="bg-slate-900 text-white p-6 rounded-2xl shadow-md border border-slate-800 mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -447,7 +541,8 @@ export const AdminDashboard: React.FC = () => {
           <span>{editingPostId ? 'समाचार सम्पादन' : 'नयाँ समाचार'}</span>
         </button>
 
-        <button
+        {currentRole === 'super_admin' && (
+<button
           onClick={() => setActiveTab('ads')}
           className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
             activeTab === 'ads'
@@ -458,8 +553,10 @@ export const AdminDashboard: React.FC = () => {
           <Megaphone className="w-4 h-4" />
           <span>विज्ञापन व्यवस्थापन ({ads.length})</span>
         </button>
+)}
 
-        <button
+        {currentRole !== 'reporter' && (
+<button
           onClick={() => setActiveTab('categories')}
           className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
             activeTab === 'categories'
@@ -470,8 +567,23 @@ export const AdminDashboard: React.FC = () => {
           <Layers className="w-4 h-4" />
           <span>क्याटगोरी & नेभिगेसन</span>
         </button>
+)}
+{currentRole !== 'reporter' && (
+<button
+          onClick={() => setActiveTab('comments')}
+          className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
+            activeTab === 'comments'
+              ? 'border-red-600 text-red-600 dark:text-red-400'
+              : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900'
+          }`}
+        >
+          <MessageSquare className="w-4 h-4" />
+          <span>टिप्पणी{pendingComments > 0 ? ` (${pendingComments})` : ''}</span>
+        </button>
+)}
 
-        <button
+        {currentRole === 'super_admin' && (
+<button
           onClick={() => setActiveTab('staff')}
           className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
             activeTab === 'staff'
@@ -482,8 +594,10 @@ export const AdminDashboard: React.FC = () => {
           <Users className="w-4 h-4 text-purple-500" />
           <span>कर्मचारी तथा सम्पादक ({users.length})</span>
         </button>
+)}
 
-        <button
+        {currentRole === 'super_admin' && (
+<button
           onClick={() => setActiveTab('settings')}
           className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
             activeTab === 'settings'
@@ -494,8 +608,10 @@ export const AdminDashboard: React.FC = () => {
           <Settings className="w-4 h-4" />
           <span>साइट सेटिङ & ब्रान्डिङ</span>
         </button>
+)}
 
-        <button
+        {currentRole === 'super_admin' && (
+<button
           onClick={() => setActiveTab('notifications')}
           className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
             activeTab === 'notifications'
@@ -506,6 +622,7 @@ export const AdminDashboard: React.FC = () => {
           <BellRing className="w-4 h-4 text-amber-500 animate-pulse" />
           <span>पुस नोटिफिकेसन (Push Alerts)</span>
         </button>
+)}
 
         <button
           onClick={() => setActiveTab('sql_schema')}
@@ -655,7 +772,12 @@ export const AdminDashboard: React.FC = () => {
                           </td>
 
                           <td className="p-3.5">
-                            {post.status === 'published' && (
+                            {post.status === 'published' && post.published_at && new Date(post.published_at).getTime() > Date.now() && (
+                              <span className="px-2.5 py-1 rounded-full bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 font-bold text-[10px] inline-flex items-center gap-1">
+                                <Clock className="w-3 h-3" /> निर्धारित: {new Date(post.published_at).toLocaleString('ne-NP')}
+                              </span>
+                            )}
+                            {post.status === 'published' && !(post.published_at && new Date(post.published_at).getTime() > Date.now()) && (
                               <span className="px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold text-[10px] inline-flex items-center gap-1">
                                 <CheckCircle2 className="w-3 h-3" /> प्रकाशित
                               </span>
@@ -923,6 +1045,35 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
+            {currentRole === 'super_admin' && (
+              <div className="pt-2">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
+                  ⏰ प्रकाशन समय तोक्नुहोस् (Schedule, वैकल्पिक)
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="datetime-local"
+                    value={postPublishAt}
+                    min={toLocalInput(new Date().toISOString())}
+                    onChange={(e) => setPostPublishAt(e.target.value)}
+                    className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white outline-none"
+                  />
+                  {postPublishAt && (
+                    <button
+                      type="button"
+                      onClick={() => setPostPublishAt('')}
+                      className="text-xs font-bold text-slate-500 hover:text-red-600 cursor-pointer"
+                    >
+                      समय हटाउनुहोस्
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  खाली राख्दा "Approve & Publish" थिच्ना साथ प्रकाशित हुन्छ। समय तोक्यो भने पाठकले त्यही समयपछि मात्र देख्छन्।
+                </p>
+              </div>
+            )}
+
             {/* ACTION BUTTONS BASED ON USER ROLE */}
             <div className="flex flex-wrap items-center justify-end gap-3 pt-6 border-t border-slate-200 dark:border-slate-800">
               <button
@@ -949,7 +1100,11 @@ export const AdminDashboard: React.FC = () => {
                   className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition shadow-md cursor-pointer flex items-center gap-1.5"
                 >
                   <Check className="w-4 h-4" />
-                  <span>स्वीकृत & प्रत्यक्ष प्रकाशित गर्नुहोस् (Approve & Publish)</span>
+                  <span>
+                    {postPublishAt
+                      ? 'तोकिएको समयमा प्रकाशित गर्नुहोस् (Schedule)'
+                      : 'स्वीकृत & प्रत्यक्ष प्रकाशित गर्नुहोस् (Approve & Publish)'}
+                  </span>
                 </button>
               )}
             </div>
@@ -971,6 +1126,32 @@ export const AdminDashboard: React.FC = () => {
                 प्रत्येक विज्ञापनका लागि PC बाट ब्यानर तस्बिर अपलोड गर्नुहोस् वा Google AdSense / HTML स्क्रिप्ट कोड प्रयोग गर्नुहोस्।
               </p>
             </div>
+          </div>
+
+          {/* AD SIZE GUIDE */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs">
+            <h4 className="font-bold text-sm text-slate-900 dark:text-white mb-2">विज्ञापन साइज गाइड (Image Size Guide)</h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs min-w-[460px]">
+                <thead>
+                  <tr className="text-slate-500 border-b border-slate-200 dark:border-slate-800">
+                    <th className="py-1.5 pr-3 font-semibold">स्थान</th>
+                    <th className="py-1.5 pr-3 font-semibold">साइज (px)</th>
+                    <th className="py-1.5 font-semibold">कहाँ देखिन्छ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(Object.keys(AD_SPECS) as AdPlacementSlot[]).map((slot) => (
+                    <tr key={slot} className="border-b border-slate-100 dark:border-slate-800/60 last:border-0 text-slate-700 dark:text-slate-300">
+                      <td className="py-1.5 pr-3 font-mono">{slot}</td>
+                      <td className="py-1.5 pr-3 font-bold">{AD_SPECS[slot].w} × {AD_SPECS[slot].h}</td>
+                      <td className="py-1.5">{AD_SPECS[slot].where}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-2">JPG / PNG / WebP, २०० KB भन्दा सानो भए पेज छिटो खुल्छ। ठूलो तस्बिर आफैं सानो पारिन्छ।</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1054,9 +1235,27 @@ export const AdminDashboard: React.FC = () => {
                     <label className="block text-[11px] font-bold text-slate-500 uppercase">
                       PC बाट तस्बिर अपलोड वा ब्यानर पूर्वावलोकन
                     </label>
-                    <div className="h-24 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
-                      <img src={ad.image_url} alt={ad.title} className="w-full h-full object-cover" />
+                    <div
+                      className="w-full mx-auto rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center"
+                      style={{
+                        aspectRatio: `${AD_SPECS[ad.placement_slot].w} / ${AD_SPECS[ad.placement_slot].h}`,
+                        maxWidth: AD_SPECS[ad.placement_slot].w
+                      }}
+                    >
+                      {ad.image_url ? (
+                        <img src={ad.image_url} alt={ad.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-[11px] text-slate-400">
+                          {AD_SPECS[ad.placement_slot].w} × {AD_SPECS[ad.placement_slot].h} px
+                        </span>
+                      )}
                     </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      सिफारिस साइज: <strong>{AD_SPECS[ad.placement_slot].w} × {AD_SPECS[ad.placement_slot].h} px</strong> · {AD_SPECS[ad.placement_slot].note}
+                    </p>
+                    {adSizeNotes[ad.id] && (
+                      <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">{adSizeNotes[ad.id]}</p>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <input
                         type="file"
@@ -1130,6 +1329,112 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* COMMENT MODERATION */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'comments' && currentRole !== 'reporter' && (
+        <div className="space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-xl font-extrabold text-slate-900 dark:text-white">पाठक टिप्पणी व्यवस्थापन</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">आपत्तिजनक टिप्पणी लुकाउनुहोस् वा मेटाउनुहोस्।</p>
+            </div>
+            {currentRole === 'super_admin' && (
+              <label className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!siteSettings.comments_need_approval}
+                  onChange={(e) => updateSiteSettings({ comments_need_approval: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                नयाँ टिप्पणी स्वीकृत नभएसम्म नदेखाउनुहोस्
+              </label>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ['all', `सबै (${comments.length})`],
+                ['pending', `स्वीकृति बाँकी (${pendingComments})`],
+                ['approved', `देखिने (${comments.length - pendingComments})`]
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setCommentFilter(key)}
+                className={`px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer ${
+                  commentFilter === key
+                    ? 'bg-red-600 text-white'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-3">
+            {comments
+              .filter((c) => (commentFilter === 'all' ? true : commentFilter === 'pending' ? !c.is_approved : c.is_approved))
+              .slice()
+              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+              .map((c) => {
+                const postOfComment = posts.find((p) => p.id === c.post_id);
+                return (
+                  <div
+                    key={c.id}
+                    className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                      <div className="text-sm font-bold text-slate-900 dark:text-white break-words">
+                        {c.author_name}
+                        <span className="ml-2 text-[11px] font-normal text-slate-400">
+                          {new Date(c.created_at).toLocaleString('ne-NP')}
+                        </span>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          c.is_approved
+                            ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                            : 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
+                        }`}
+                      >
+                        {c.is_approved ? 'देखिन्छ' : 'स्वीकृति बाँकी'}
+                      </span>
+                    </div>
+                    {postOfComment && (
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2 break-words">
+                        समाचार: {postOfComment.title}
+                      </p>
+                    )}
+                    <p className="text-sm text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-words">{c.content}</p>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      <button
+                        onClick={() => updateCommentApproval(c.id, !c.is_approved)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+                      >
+                        {c.is_approved ? 'लुकाउनुहोस्' : 'स्वीकृत गर्नुहोस्'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (window.confirm('यो टिप्पणी सधैंका लागि मेटाउने?')) deleteComment(c.id);
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 hover:bg-rose-100 cursor-pointer"
+                      >
+                        मेटाउनुहोस्
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            {comments.length === 0 && (
+              <div className="text-center text-sm text-slate-400 py-10">अहिलेसम्म कुनै टिप्पणी छैन।</div>
+            )}
           </div>
         </div>
       )}
@@ -1323,7 +1628,7 @@ export const AdminDashboard: React.FC = () => {
                 <pre className="p-2 rounded bg-slate-900 text-emerald-300 font-mono text-[10px] overflow-x-auto">
 {`UPDATE public.users_profile
 SET role = 'editor' -- वा 'super_admin'
-WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com.np');`}
+WHERE user_id = (SELECT id FROM auth.users WHERE email = 'staff@example.com');`}
                 </pre>
               </div>
             </div>
@@ -1397,7 +1702,7 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                       {showNewStaffPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  <p className="text-[10px] text-slate-500 mt-0.5">कम्तिमा ४ अक्षरको गोप्य पासवर्ड राख्नुहोस्।</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">कम्तिमा ६ अक्षरको गोप्य पासवर्ड राख्नुहोस्।</p>
                 </div>
 
                 <div>
@@ -1516,7 +1821,7 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-0 border-slate-100 dark:border-slate-800">
+                    <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-0 border-slate-100 dark:border-slate-800">
                       {/* Password Reset Button */}
                       <button
                         type="button"
@@ -1531,6 +1836,22 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                         <Key className="w-3.5 h-3.5 text-amber-500" />
                         <span>पासवर्ड</span>
                       </button>
+
+                      {/* Activate / deactivate (inactive staff cannot do anything) */}
+                      {staff.user_id !== currentUser.user_id && (
+                        <button
+                          type="button"
+                          onClick={() => updateUser(staff.id, { is_active: !staff.is_active })}
+                          className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border cursor-pointer ${
+                            staff.is_active
+                              ? 'border-emerald-300 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40'
+                              : 'border-rose-300 text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40'
+                          }`}
+                          title="पहुँच सक्रिय / निष्क्रिय गर्नुहोस्"
+                        >
+                          {staff.is_active ? 'सक्रिय' : 'निष्क्रिय'}
+                        </button>
+                      )}
 
                       {/* Change Role Dropdown */}
                       <select
@@ -1548,7 +1869,7 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                         <button
                           type="button"
                           onClick={() => {
-                            if (window.confirm(`के तपाईं "${staff.full_name}" लाई हटाउन निश्चित हुनुहुन्छ?`)) {
+                            if (window.confirm(`के तपाईं "${staff.full_name}" को पहुँच हटाउन निश्चित हुनुहुन्छ?`)) {
                               deleteUser(staff.id);
                             }
                           }}
@@ -1598,6 +1919,29 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                   </div>
                 )}
 
+                {passwordModalUser.user_id !== currentUser.user_id ? (
+                  <div className="space-y-4">
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      सुरक्षाका लागि अरूको पासवर्ड देख्न वा सेट गर्न मिल्दैन। उहाँको इमेलमा रिसेट लिङ्क पठाउन सकिन्छ।
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPasswordModalUser(null)}
+                        className="flex-1 py-2 px-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        रद्द गर्नुहोस्
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSendReset}
+                        className="flex-1 py-2 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        रिसेट लिङ्क पठाउनुहोस्
+                      </button>
+                    </div>
+                  </div>
+                ) : (
                 <form onSubmit={handleSavePasswordChange} className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -1607,6 +1951,7 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                       <input
                         type={showModalPassword ? 'text' : 'password'}
                         required
+                        minLength={6}
                         value={newPasswordVal}
                         onChange={(e) => setNewPasswordVal(e.target.value)}
                         placeholder="नयाँ पासवर्ड राख्नुहोस्..."
@@ -1622,7 +1967,7 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                       </button>
                     </div>
                     <p className="text-[10px] text-slate-500 mt-1">
-                      कम्तिमा ४ अक्षरको पासवर्ड हुनुपर्छ। लगइन गर्दा यही पासवर्ड प्रयोग गर्नुपर्छ।
+                      कम्तिमा ६ अक्षरको पासवर्ड हुनुपर्छ।
                     </p>
                   </div>
 
@@ -1642,6 +1987,7 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                     </button>
                   </div>
                 </form>
+                )}
               </div>
             </div>
           )}
@@ -1777,7 +2123,7 @@ WHERE user_id = (SELECT id FROM auth.users WHERE email = 'editor@pabansubedi.com
                 type="email"
                 value={settingsForm.contact_email || ''}
                 onChange={(e) => setSettingsForm({ ...settingsForm, contact_email: e.target.value })}
-                placeholder="pabansubedi128@gmail.com"
+                placeholder="contact@example.com"
                 className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white"
               />
             </div>

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   UserProfile,
   Category,
@@ -10,35 +10,45 @@ import {
   PostStatus
 } from '../types';
 import {
-  INITIAL_USERS,
   INITIAL_CATEGORIES,
   INITIAL_POSTS,
   INITIAL_ADS,
   INITIAL_SITE_SETTINGS,
   INITIAL_COMMENTS
 } from './defaultData';
-import { supabase } from './supabase';
+import { createClient } from '@supabase/supabase-js';
+import { supabase, SUPABASE_CONFIG } from './supabase';
 import { notifyNewArticlePublished } from './notificationService';
+
+export interface NewStaffInput {
+  email: string;
+  password: string;
+  full_name: string;
+  role: UserRole;
+  phone?: string;
+  bio?: string;
+  avatar?: string;
+}
 
 interface NewsAppContextType {
   // Current user & role (Strictly confidential; defaults to 'public' for portal visitors)
   currentUser: UserProfile;
   currentRole: UserRole;
   users: UserProfile[];
-  addUser: (user: Omit<UserProfile, 'id'>) => void;
+  addUser: (user: NewStaffInput) => Promise<{ ok: boolean; error?: string; needsConfirm?: boolean }>;
   updateUser: (id: string, user: Partial<UserProfile>) => void;
   deleteUser: (id: string) => void;
-  switchRole: (role: UserRole) => void;
   adminLoginModalOpen: boolean;
   setAdminLoginModalOpen: (open: boolean) => void;
-  verifyLogin: (email: string, password: string) => { success: boolean; error?: string; user?: UserProfile };
-  changeUserPassword: (userId: string, newPassword: string) => void;
-  loginAs: (role: UserRole, email?: string, name?: string) => void;
+  verifyLogin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  changeUserPassword: (newPassword: string) => Promise<{ ok: boolean; error?: string }>;
+  sendPasswordReset: (email: string) => Promise<{ ok: boolean; error?: string }>;
   logoutStaff: () => void;
 
   // Data
   siteSettings: SiteSettings;
   updateSiteSettings: (settings: Partial<SiteSettings>) => void;
+  postsLoaded: boolean;
   totalVisitors: number;
   onlineVisitors: number;
   incrementTotalVisitors: () => void;
@@ -48,7 +58,8 @@ interface NewsAppContextType {
   updateCategory: (id: string, cat: Partial<Category>) => void;
   deleteCategory: (id: string) => void;
 
-  posts: Post[];
+  posts: Post[]; // what READERS may see (scheduled posts are hidden until their time)
+  allPosts: Post[]; // everything this login can see (admin panel)
   addPost: (post: Omit<Post, 'id' | 'views' | 'created_at' | 'updated_at'>) => Post;
   updatePost: (id: string, post: Partial<Post>) => void;
   deletePost: (id: string) => void;
@@ -61,6 +72,8 @@ interface NewsAppContextType {
 
   comments: Comment[];
   addComment: (postId: string, authorName: string, content: string) => void;
+  updateCommentApproval: (id: string, approved: boolean) => void;
+  deleteComment: (id: string) => void;
 
   // Theme & Navigation
   isDarkMode: boolean;
@@ -166,6 +179,22 @@ const settingsRow = (s: SiteSettings) => {
   return rest;
 };
 
+// A post is live for readers when it is published AND its publish time has come
+export const isPostLive = (p: Post, now: number = Date.now()): boolean =>
+  p.status === 'published' && (!p.published_at || new Date(p.published_at).getTime() <= now);
+
+const mapProfile = (r: any, fallbackEmail = ''): UserProfile => ({
+  id: r.id,
+  user_id: r.user_id,
+  role: r.role,
+  full_name: r.full_name || r.email || fallbackEmail,
+  email: r.email || fallbackEmail,
+  avatar: r.avatar || '',
+  bio: r.bio || undefined,
+  phone: r.phone || undefined,
+  is_active: !!r.is_active
+});
+
 const GUEST_USER: UserProfile = {
   id: 'guest-public',
   user_id: 'guest',
@@ -175,6 +204,44 @@ const GUEST_USER: UserProfile = {
   avatar: ''
 };
 
+// ---------------------------------------------------------------------------
+// Real URLs: /news/<slug>, /category/<slug>, /admin, /docs  (History API).
+// GitHub Pages serves 404.html (= index.html) for deep links, and the build
+// pre-renders every published article (see scripts/prerender-articles.mjs).
+// ---------------------------------------------------------------------------
+type Page = 'home' | 'article' | 'category' | 'admin' | 'docs';
+type Route = { page: Page; param?: string };
+
+const pathFor = (page: Page, param?: string): string => {
+  switch (page) {
+    case 'article':
+      return param ? `/news/${encodeURIComponent(param)}` : '/';
+    case 'category':
+      return param ? `/category/${encodeURIComponent(param)}` : '/';
+    case 'admin':
+      return '/admin';
+    case 'docs':
+      return '/docs';
+    default:
+      return param ? `/?q=${encodeURIComponent(param)}` : '/';
+  }
+};
+
+const parseLocation = (): Route => {
+  try {
+    const { pathname, search } = window.location;
+    const parts = pathname.split('/').filter(Boolean).map((x) => decodeURIComponent(x));
+    if (parts[0] === 'news' && parts[1]) return { page: 'article', param: parts[1] };
+    if (parts[0] === 'category' && parts[1]) return { page: 'category', param: parts[1] };
+    if (parts[0] === 'admin') return { page: 'admin' };
+    if (parts[0] === 'docs') return { page: 'docs' };
+    const q = new URLSearchParams(search).get('q');
+    return q ? { page: 'home', param: q } : { page: 'home' };
+  } catch {
+    return { page: 'home' };
+  }
+};
+
 export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Persistence keys
   const SETTINGS_KEY = 'nepal_news_settings_v2';
@@ -182,125 +249,33 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const CATEGORIES_KEY = 'nepal_news_categories_v2';
   const ADS_KEY = 'nepal_news_ads_v2';
   const COMMENTS_KEY = 'nepal_news_comments_v2';
-  const AUTH_SESSION_KEY = 'nepal_news_auth_session_v2';
-  const USERS_KEY = 'nepal_news_users_v2';
-
-  const [users, setUsers] = useState<UserProfile[]>(() => {
+  // Staff identity comes ONLY from Supabase Auth (see "STAFF LOGIN" below).
+  // The old fake login kept plaintext passwords in LocalStorage: wipe them.
+  useEffect(() => {
     try {
-      const saved = localStorage.getItem(USERS_KEY);
-      if (saved) {
-        const parsed: UserProfile[] = JSON.parse(saved);
-        // Ensure initial accounts and all staff have a default secure password if not set
-        const migrated = parsed.map((u) => {
-          if (!u.password) {
-            if (u.email.toLowerCase() === 'pabansubedi128@gmail.com' || u.role === 'super_admin') {
-              return { ...u, password: 'paban@admin2026' };
-            }
-            if (u.role === 'editor') {
-              return { ...u, password: 'editor@2026' };
-            }
-            return { ...u, password: 'reporter@2026' };
-          }
-          return u;
-        });
+      localStorage.removeItem('nepal_news_auth_session_v2');
+      localStorage.removeItem('nepal_news_users_v2');
+    } catch {}
+  }, []);
 
-        const hasPaban = migrated.some((u) => u.email.toLowerCase() === 'pabansubedi128@gmail.com');
-        if (!hasPaban) {
-          migrated.unshift(INITIAL_USERS[0]);
-        }
-        return migrated;
-      }
-      return INITIAL_USERS;
-    } catch {
-      return INITIAL_USERS;
-    }
-  });
-
-  const addUser = (newUser: Omit<UserProfile, 'id'>) => {
-    const item: UserProfile = {
-      ...newUser,
-      id: `user-${Date.now()}`
-    };
-    const updated = [...users, item];
-    setUsers(updated);
-    try {
-      localStorage.setItem(USERS_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage error', e);
-    }
-  };
-
-  const updateUser = (id: string, userFields: Partial<UserProfile>) => {
-    const updated = users.map((u) => (u.id === id ? { ...u, ...userFields } : u));
-    setUsers(updated);
-    try {
-      localStorage.setItem(USERS_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage error', e);
-    }
-  };
-
-  const deleteUser = (id: string) => {
-    const updated = users.filter((u) => u.id !== id);
-    setUsers(updated);
-    try {
-      localStorage.setItem(USERS_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage error', e);
-    }
-  };
-
-  // Role: STRICTLY default to 'public' for any site visitor!
-  const [currentRole, setCurrentRole] = useState<UserRole>(() => {
-    try {
-      const savedAuth = localStorage.getItem(AUTH_SESSION_KEY);
-      if (savedAuth) {
-        const parsed = JSON.parse(savedAuth);
-        return parsed.role || 'public';
-      }
-      return 'public';
-    } catch {
-      return 'public';
-    }
-  });
-
-  const [currentUser, setCurrentUser] = useState<UserProfile>(() => {
-    try {
-      const savedAuth = localStorage.getItem(AUTH_SESSION_KEY);
-      if (savedAuth) {
-        const parsed = JSON.parse(savedAuth);
-        return parsed.user || GUEST_USER;
-      }
-      return GUEST_USER;
-    } catch {
-      return GUEST_USER;
-    }
-  });
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [currentRole, setCurrentRole] = useState<UserRole>('public');
+  const [currentUser, setCurrentUser] = useState<UserProfile>(GUEST_USER);
 
   const [adminLoginModalOpen, setAdminLoginModalOpen] = useState(false);
 
-  // Total visitors & realistic dynamic live reader count
+  // REAL visitor counter (Supabase site_stats; +1 per browser session) and
+  // REAL online readers (Supabase Realtime presence). No more fake numbers.
   const [totalVisitors, setTotalVisitors] = useState<number>(() => {
     try {
-      const saved = localStorage.getItem('nepal_news_total_visitors_v2');
-      return saved ? parseInt(saved, 10) : 148620;
+      const saved = localStorage.getItem('news_total_visitors_v3');
+      return saved ? parseInt(saved, 10) || 0 : 0;
     } catch {
-      return 148620;
+      return 0;
     }
   });
-  const [onlineVisitors, setOnlineVisitors] = useState<number>(() => 46 + Math.floor(Math.random() * 12));
-
-  // Realistic gentle online reader oscillation (every 14 seconds)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setOnlineVisitors((prev) => {
-        const delta = Math.floor(Math.random() * 5) - 2; // -2, -1, 0, 1, 2
-        const updated = prev + delta;
-        return updated < 36 ? 39 : updated > 86 ? 78 : updated;
-      });
-    }, 14000);
-    return () => clearInterval(interval);
-  }, []);
+  const [onlineVisitors, setOnlineVisitors] = useState<number>(1);
+  const [postsLoaded, setPostsLoaded] = useState(false);
 
   // Site Settings
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(() => {
@@ -360,10 +335,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   });
 
   // Navigation route
-  const [currentRoute, setCurrentRoute] = useState<{
-    page: 'home' | 'article' | 'category' | 'admin' | 'docs';
-    param?: string;
-  }>({ page: 'home' });
+  const [currentRoute, setCurrentRoute] = useState<Route>(() => parseLocation());
 
   // Theme
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -384,15 +356,39 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [isDarkMode]);
 
-  // Track visitor counts
+  // Real visitor counter: +1 once per browser session (server side, atomic)
   useEffect(() => {
+    (async () => {
+      try {
+        if (sessionStorage.getItem('np_visit_counted')) return;
+        const { data, error } = await supabase.rpc('increment_site_visitors');
+        if (!error && data !== null && data !== undefined) {
+          sessionStorage.setItem('np_visit_counted', '1');
+          const n = Number(data) || 0;
+          setTotalVisitors(n);
+          try {
+            localStorage.setItem('news_total_visitors_v3', String(n));
+          } catch {}
+        }
+      } catch {}
+    })();
+  }, []);
+
+  // Real "online readers": everyone connected to this Realtime channel right now
+  useEffect(() => {
+    let ch: ReturnType<typeof supabase.channel> | null = null;
     try {
-      const current = totalVisitors + 1;
-      setTotalVisitors(current);
-      localStorage.setItem('nepal_news_total_visitors_v2', current.toString());
-    } catch (e) {
-      console.warn('LocalStorage error', e);
-    }
+      const key = `r-${Math.random().toString(36).slice(2, 10)}`;
+      ch = supabase.channel('news_paban_online_readers', { config: { presence: { key } } });
+      ch.on('presence', { event: 'sync' }, () => {
+        setOnlineVisitors(Math.max(1, Object.keys(ch!.presenceState()).length));
+      }).subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') await ch!.track({ at: Date.now() });
+      });
+    } catch {}
+    return () => {
+      if (ch) supabase.removeChannel(ch);
+    };
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -408,6 +404,17 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   adsRef.current = ads;
   const settingsRef = useRef<SiteSettings>(siteSettings);
   settingsRef.current = siteSettings;
+
+  // Scheduled posts (published + future time) stay hidden from readers until their time comes
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
+  const visiblePosts = useMemo(
+    () => posts.filter((p) => p.status !== 'published' || isPostLive(p, nowTick)),
+    [posts, nowTick]
+  );
 
   const inflightRef = useRef(0); // DB writes in progress
   const adTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -433,12 +440,13 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     try {
       do {
         pendingSyncRef.current = false;
-        const [s, c, p, a, cm] = await Promise.all([
+        const [s, c, p, a, cm, st] = await Promise.all([
           supabase.from('site_settings').select('*').limit(1).maybeSingle(),
           supabase.from('categories').select('*').order('order_index', { ascending: true }),
           supabase.from('posts').select('*').order('created_at', { ascending: false }),
           supabase.from('advertisements').select('*'),
-          supabase.from('comments').select('*').order('created_at', { ascending: false })
+          supabase.from('comments').select('*').order('created_at', { ascending: false }),
+          supabase.from('site_stats').select('total_visitors').eq('id', 1).maybeSingle()
         ]);
 
         // A write is in progress: its completion will trigger a fresh sync, so
@@ -466,6 +474,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
           const formatted = p.data.map(mapPost);
           setPosts(formatted);
           persist(POSTS_KEY, formatted);
+          setPostsLoaded(true);
         } else if (p.error) console.warn('posts fetch failed:', p.error.message);
 
         if (!a.error && a.data) {
@@ -479,12 +488,26 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
           setComments(formatted);
           persist(COMMENTS_KEY, formatted);
         }
+
+        if (!st.error && st.data) {
+          const n = Number(st.data.total_visitors) || 0;
+          setTotalVisitors(n);
+          try {
+            localStorage.setItem('news_total_visitors_v3', String(n));
+          } catch {}
+        }
       } while (pendingSyncRef.current);
     } catch (err) {
       console.warn('Supabase sync failed:', err);
     } finally {
       syncingRef.current = false;
     }
+  }, []);
+
+  // Never keep the article page on 'loading' forever if Supabase is unreachable
+  useEffect(() => {
+    const t = setTimeout(() => setPostsLoaded(true), 6000);
+    return () => clearTimeout(t);
   }, []);
 
   // Sync on load, when the tab becomes visible/focused again, when the network
@@ -527,6 +550,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
           if (
             (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') &&
             p?.status === 'published' &&
+            (!p.published_at || new Date(p.published_at).getTime() <= Date.now()) &&
             !postsRef.current.some((x) => x.slug === p.slug && x.status === 'published')
           ) {
             notifyNewArticlePublished({
@@ -581,118 +605,189 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const incrementTotalVisitors = () => {
-    const updated = totalVisitors + 1;
-    setTotalVisitors(updated);
-    try {
-      localStorage.setItem('nepal_news_total_visitors_v2', updated.toString());
-    } catch (e) {
-      console.warn('LocalStorage error', e);
-    }
+    /* counted on the server once per session (see effect above) */
   };
 
   const toggleDarkMode = () => setIsDarkMode((prev) => !prev);
 
-  const navigateTo = (page: 'home' | 'article' | 'category' | 'admin' | 'docs', param?: string) => {
+  const navigateTo = (page: Page, param?: string) => {
     setCurrentRoute({ page, param });
+    try {
+      const path = pathFor(page, param);
+      if (window.location.pathname + window.location.search !== path) {
+        window.history.pushState({}, '', path);
+      }
+    } catch {}
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Strict Staff Login Verification
-  const verifyLogin = (emailInput: string, passwordInput: string): { success: boolean; error?: string; user?: UserProfile } => {
+  // Browser back / forward buttons
+  useEffect(() => {
+    const onPop = () => setCurrentRoute(parseLocation());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // STAFF LOGIN = Supabase Auth.
+  // No e-mail or password exists in this code, the repo or the browser storage.
+  // Role + "active" flag come from public.users_profile (RLS: your own row, or every
+  // row if you are Super Admin). Passwords are stored hashed by Supabase, so nobody,
+  // not even the admin, can read them; the admin can only send a reset link.
+  // ---------------------------------------------------------------------------
+  const setGuest = () => {
+    setCurrentRole('public');
+    setCurrentUser(GUEST_USER);
+    setUsers([]);
+  };
+
+  const refreshUsers = async () => {
+    const { data, error } = await supabase.from('users_profile').select('*').order('created_at', { ascending: true });
+    if (!error && data) setUsers(data.map((r: any) => mapProfile(r)));
+  };
+
+  const loadProfile = async (authUser: { id: string; email?: string | null } | null): Promise<UserProfile | null> => {
+    if (!authUser) {
+      setGuest();
+      return null;
+    }
+    const { data, error } = await supabase.from('users_profile').select('*').eq('user_id', authUser.id).maybeSingle();
+    if (error || !data || !data.is_active) {
+      setGuest();
+      return null;
+    }
+    const profile = mapProfile(data, authUser.email || '');
+    setCurrentRole(profile.role);
+    setCurrentUser(profile);
+    if (profile.role === 'super_admin') refreshUsers();
+    return profile;
+  };
+
+  // Restore the session on page load + follow login / logout / password-recovery events
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data }) => {
+      const user = data.session?.user ?? null;
+      const profile = await loadProfile(user);
+      if (user && !profile) supabase.auth.signOut(); // a login without staff access is not kept
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') window.dispatchEvent(new CustomEvent('news-password-recovery'));
+      // never await Supabase calls directly inside this callback (can deadlock): defer
+      setTimeout(() => {
+        loadProfile(session?.user ?? null);
+      }, 0);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  // staff see drafts / pending posts, readers do not: re-fetch whenever the role changes
+  useEffect(() => {
+    syncFromSupabase();
+  }, [currentRole]);
+
+  const verifyLogin = async (emailInput: string, passwordInput: string) => {
     const email = emailInput.trim().toLowerCase();
-    const pass = passwordInput.trim();
+    if (!email) return { success: false, error: 'कृपया इमेल ठेगाना प्रविष्ट गर्नुहोस्।' };
+    if (!passwordInput) return { success: false, error: 'कृपया पासवर्ड प्रविष्ट गर्नुहोस्।' };
 
-    if (!email) {
-      return { success: false, error: 'कृपया इमेल ठेगाना प्रविष्ट गर्नुहोस्।' };
-    }
-    if (!pass) {
-      return { success: false, error: 'कृपया पासवर्ड प्रविष्ट गर्नुहोस्।' };
-    }
-
-    const matchedUser = users.find((u) => u.email.trim().toLowerCase() === email);
-
-    if (!matchedUser) {
-      return {
-        success: false,
-        error: `"${email}" इमेल प्रणालीमा दर्ता भएको छैन। कृपया सही आधिकारिक इमेल राख्नुहोस्।`
-      };
-    }
-
-    // Determine expected password for this account
-    const userPass = matchedUser.password || (matchedUser.role === 'super_admin' ? 'paban@admin2026' : matchedUser.role === 'editor' ? 'editor@2026' : 'reporter@2026');
-    const isMasterAdminPass = matchedUser.role === 'super_admin' && (pass === 'paban@admin2026' || pass === 'paban123');
-
-    if (pass !== userPass && !isMasterAdminPass) {
-      return {
-        success: false,
-        error: 'पासवर्ड मिलेन! कृपया सही पासवर्ड प्रविष्ट गर्नुहोस्।'
-      };
-    }
-
-    // Successful authentication
-    setCurrentRole(matchedUser.role);
-    setCurrentUser(matchedUser);
-    try {
-      localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({ role: matchedUser.role, user: matchedUser }));
-    } catch (e) {
-      console.warn('LocalStorage auth write error', e);
-    }
-
-    return { success: true, user: matchedUser };
-  };
-
-  const changeUserPassword = (userId: string, newPassword: string) => {
-    if (!newPassword || newPassword.trim().length < 4) return;
-    updateUser(userId, { password: newPassword.trim() });
-    if (currentUser.id === userId) {
-      const updatedUser = { ...currentUser, password: newPassword.trim() };
-      setCurrentUser(updatedUser);
-      try {
-        localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({ role: currentRole, user: updatedUser }));
-      } catch (e) {
-        console.warn('LocalStorage auth update error', e);
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password: passwordInput });
+    if (error || !data.user) {
+      if ((error?.message || '').toLowerCase().includes('not confirmed')) {
+        return { success: false, error: 'इमेल पुष्टि भएको छैन। इमेलमा आएको लिङ्क थिचेर पुष्टि गर्नुहोस्।' };
       }
+      // same message for "no such user" and "wrong password": do not reveal which e-mails exist
+      return { success: false, error: 'इमेल वा पासवर्ड मिलेन।' };
     }
-  };
-
-  const loginAs = (role: UserRole, email?: string, name?: string) => {
-    const matched = users.find((u) => (email && u.email.toLowerCase() === email.toLowerCase()) || u.role === role) || {
-      id: `user-${role}-custom`,
-      user_id: `usr_${role}`,
-      role,
-      full_name: name || (role === 'super_admin' ? 'पवन सुवेदी (Paban Subedi)' : role === 'editor' ? 'सम्पादक (Editor)' : 'संवाददाता (Reporter)'),
-      email: email || `${role}@pabansubedi.com.np`,
-      password: role === 'super_admin' ? 'paban@admin2026' : role === 'editor' ? 'editor@2026' : 'reporter@2026',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'
-    };
-    setCurrentRole(role);
-    setCurrentUser(matched);
-    try {
-      localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify({ role, user: matched }));
-    } catch (e) {
-      console.warn('LocalStorage auth write error', e);
+    const profile = await loadProfile(data.user);
+    if (!profile) {
+      await supabase.auth.signOut();
+      return { success: false, error: 'यो खाता सक्रिय छैन वा स्टाफ अनुमति छैन। सुपर एडमिनसँग सम्पर्क गर्नुहोस्।' };
     }
+    return { success: true };
   };
 
   const logoutStaff = () => {
-    setCurrentRole('public');
-    setCurrentUser(GUEST_USER);
-    try {
-      localStorage.removeItem(AUTH_SESSION_KEY);
-    } catch (e) {
-      console.warn('LocalStorage auth clear error', e);
-    }
+    supabase.auth.signOut().catch(() => {});
+    setGuest();
     if (currentRoute.page === 'admin') {
       navigateTo('home');
     }
   };
 
-  const switchRole = (role: UserRole) => {
-    if (role === 'public') {
-      logoutStaff();
-    } else {
-      loginAs(role);
+  // Super Admin creates a staff login. A separate, non-persistent client is used so the
+  // new account does not replace YOUR session.
+  const addUser = async (input: NewStaffInput) => {
+    if (currentRole !== 'super_admin') {
+      return { ok: false, error: 'केवल सुपर एडमिनले मात्र कर्मचारी थप्न सक्छ।' };
     }
+    const temp = createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.key, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+    });
+    const { data, error } = await temp.auth.signUp({
+      email: input.email,
+      password: input.password,
+      options: { data: { full_name: input.full_name } }
+    });
+    if (error) return { ok: false, error: error.message };
+    const created = data.user;
+    if (!created || (created.identities && created.identities.length === 0)) {
+      return { ok: false, error: 'यो इमेल पहिले नै दर्ता भइसकेको छ।' };
+    }
+    // the database trigger made an INACTIVE reporter profile: set the real role and activate it
+    const ok = await dbWrite('Staff add', () =>
+      supabase
+        .from('users_profile')
+        .update({
+          role: input.role,
+          full_name: input.full_name,
+          phone: input.phone || null,
+          bio: input.bio || null,
+          avatar: input.avatar || null,
+          is_active: true
+        })
+        .eq('user_id', created.id)
+    );
+    await refreshUsers();
+    if (!ok) return { ok: false, error: 'खाता बन्यो तर भूमिका सेट हुन सकेन। सूचीमा गएर भूमिका फेरि छान्नुहोस्।' };
+    return { ok: true, needsConfirm: !data.session };
+  };
+
+  const updateUser = (id: string, fields: Partial<UserProfile>) => {
+    const target = users.find((u) => u.id === id);
+    if (!target) return;
+    if (target.user_id === currentUser.user_id && (fields.is_active === false || (fields.role && fields.role !== 'super_admin'))) {
+      window.dispatchEvent(new CustomEvent('news-sync-error', { detail: 'आफ्नै सुपर एडमिन भूमिका वा पहुँच हटाउन मिल्दैन।' }));
+      return;
+    }
+    const row: Record<string, any> = {};
+    (['role', 'full_name', 'phone', 'bio', 'avatar', 'is_active'] as const).forEach((k) => {
+      if (fields[k] !== undefined) row[k] = fields[k];
+    });
+    if (Object.keys(row).length === 0) return;
+    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...fields } : u)));
+    dbWrite('Staff update', () => supabase.from('users_profile').update(row).eq('id', id)).then(() => refreshUsers());
+  };
+
+  // Removes the staff PROFILE (= all access). The bare login stays in Supabase ->
+  // Authentication -> Users, where it can be deleted too.
+  const deleteUser = (id: string) => {
+    const target = users.find((u) => u.id === id);
+    if (!target || target.user_id === currentUser.user_id) return;
+    setUsers((prev) => prev.filter((u) => u.id !== id));
+    dbWrite('Staff remove', () => supabase.from('users_profile').delete().eq('id', id));
+  };
+
+  const changeUserPassword = async (newPassword: string) => {
+    if (newPassword.length < 6) return { ok: false, error: 'पासवर्ड कम्तिमा ६ अक्षरको हुनुपर्छ।' };
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    return error ? { ok: false, error: error.message } : { ok: true };
+  };
+
+  const sendPasswordReset = async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/admin`
+    });
+    return error ? { ok: false, error: error.message } : { ok: true };
   };
 
   // Site Settings (synced to Supabase public.site_settings)
@@ -776,6 +871,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     featured_image: p.featured_image || '',
     image_caption: p.image_caption || '',
     category_id: await resolveCategoryUuid(p.category_id), // was missing before -> category lost in other browsers
+    author_id: isUuid(p.author_id) ? p.author_id : null,
     author_name: p.author_name || 'पवन सुवेदी',
     author_avatar: p.author_avatar || null,
     editor_name: p.editor_name || '',
@@ -788,9 +884,10 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     audio_url: p.audio_url || null
   });
 
-  const savePost = (label: string, p: Post, oldSlug?: string) =>
+  const savePost = (label: string, p: Post, oldSlug?: string, isNew = false) =>
     dbWrite(label, async () => {
       const row = await postRow(p);
+      if (isNew) return supabase.from('posts').insert(row);
       return oldSlug && oldSlug !== p.slug
         ? supabase.from('posts').update(row).eq('slug', oldSlug) // slug renamed: don't create a duplicate
         : supabase.from('posts').upsert(row, { onConflict: 'slug' });
@@ -804,23 +901,34 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
       is_breaking: p.is_breaking
     });
 
+  // Two news must never share one slug (the second would overwrite the first)
+  const uniqueSlug = (base: string, ignoreId?: string) => {
+    const clean = (base || '').trim() || `news-${Date.now().toString().slice(-6)}`;
+    const taken = new Set(postsRef.current.filter((p) => p.id !== ignoreId).map((p) => p.slug));
+    if (!taken.has(clean)) return clean;
+    let i = 2;
+    while (taken.has(`${clean}-${i}`)) i++;
+    return `${clean}-${i}`;
+  };
+
   const addPost = (postData: Omit<Post, 'id' | 'views' | 'created_at' | 'updated_at'>): Post => {
     const nowIso = new Date().toISOString();
     const newPost: Post = {
       ...postData,
+      slug: uniqueSlug(postData.slug),
       id: `post-${Date.now()}`,
       views: 0,
       created_at: nowIso,
       updated_at: nowIso,
-      published_at: postData.status === 'published' ? nowIso : null
+      published_at: postData.status === 'published' ? postData.published_at || nowIso : null
     };
     const updated = [newPost, ...postsRef.current];
     postsRef.current = updated;
     setPosts(updated);
     persist(POSTS_KEY, updated);
 
-    if (newPost.status === 'published') announce(newPost);
-    savePost('Post save', newPost);
+    if (isPostLive(newPost)) announce(newPost);
+    savePost('Post save', newPost, undefined, true);
     return newPost;
   };
 
@@ -829,18 +937,28 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!previous) return;
     const nowIso = new Date().toISOString();
     const willPublish = fields.status === 'published' && previous.status !== 'published';
+    const nextStatus = fields.status ?? previous.status;
+    let publishedAt = previous.published_at;
+    if (nextStatus === 'published') {
+      publishedAt = fields.published_at || (previous.status === 'published' ? previous.published_at : null) || nowIso;
+    } else if (fields.status) {
+      publishedAt = null;
+    }
     const modified: Post = {
       ...previous,
       ...fields,
+      slug: fields.slug !== undefined ? uniqueSlug(fields.slug, id) : previous.slug,
       updated_at: nowIso,
-      published_at: willPublish ? nowIso : fields.published_at !== undefined ? fields.published_at : previous.published_at
+      published_at: publishedAt
     };
     const updated = postsRef.current.map((p) => (p.id === id ? modified : p));
     postsRef.current = updated;
     setPosts(updated);
     persist(POSTS_KEY, updated);
 
-    if (fields.status === 'published' || (modified.status === 'published' && fields.is_breaking)) {
+    // alert readers only when a news GOES LIVE (not on every later edit)
+    const becameBreaking = !!fields.is_breaking && !previous.is_breaking;
+    if (isPostLive(modified) && (willPublish || becameBreaking)) {
       announce(modified);
     }
     savePost('Post update', modified, previous.slug);
@@ -874,7 +992,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setPosts(updated);
     persist(POSTS_KEY, updated);
 
-    if (status === 'published') announce(modified);
+    if (isPostLive(modified)) announce(modified);
 
     dbWrite('Post status', () =>
       supabase
@@ -892,6 +1010,15 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const incrementViews = (id: string) => {
     const target = postsRef.current.find((p) => p.id === id);
     if (!target) return;
+
+    // count one view per article per browser session (refresh / re-open must not inflate it)
+    try {
+      const seen: string[] = JSON.parse(sessionStorage.getItem('np_viewed') || '[]');
+      if (seen.includes(target.slug)) return;
+      seen.push(target.slug);
+      sessionStorage.setItem('np_viewed', JSON.stringify(seen));
+    } catch {}
+
     const updated = postsRef.current.map((p) => (p.id === id ? { ...p, views: (p.views || 0) + 1 } : p));
     postsRef.current = updated;
     setPosts(updated);
@@ -974,7 +1101,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
       author_name: authorName,
       content,
       created_at: new Date().toISOString(),
-      is_approved: true
+      is_approved: !settingsRef.current.comments_need_approval
     };
     const updated = [newComment, ...comments];
     setComments(updated);
@@ -983,8 +1110,26 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // comments.post_id is a UUID FK, so only real (DB) posts can store comments
     if (isUuid(postId)) {
       dbWrite('Comment', () =>
-        supabase.from('comments').insert({ post_id: postId, author_name: authorName, content, is_approved: true })
+        supabase.from('comments').insert({ post_id: postId, author_name: authorName, content, is_approved: newComment.is_approved })
       );
+    }
+  };
+
+  const updateCommentApproval = (id: string, approved: boolean) => {
+    const updated = comments.map((c) => (c.id === id ? { ...c, is_approved: approved } : c));
+    setComments(updated);
+    persist(COMMENTS_KEY, updated);
+    if (isUuid(id)) {
+      dbWrite('Comment moderation', () => supabase.from('comments').update({ is_approved: approved }).eq('id', id));
+    }
+  };
+
+  const deleteComment = (id: string) => {
+    const updated = comments.filter((c) => c.id !== id);
+    setComments(updated);
+    persist(COMMENTS_KEY, updated);
+    if (isUuid(id)) {
+      dbWrite('Comment delete', () => supabase.from('comments').delete().eq('id', id));
     }
   };
 
@@ -997,15 +1142,15 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addUser,
         updateUser,
         deleteUser,
-        switchRole,
         adminLoginModalOpen,
         setAdminLoginModalOpen,
         verifyLogin,
         changeUserPassword,
-        loginAs,
+        sendPasswordReset,
         logoutStaff,
         siteSettings,
         updateSiteSettings,
+        postsLoaded,
         totalVisitors,
         onlineVisitors,
         incrementTotalVisitors,
@@ -1013,7 +1158,8 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addCategory,
         updateCategory,
         deleteCategory,
-        posts,
+        posts: visiblePosts,
+        allPosts: posts,
         addPost,
         updatePost,
         deletePost,
@@ -1023,6 +1169,8 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updateAd,
         recordAdClick,
         comments,
+        updateCommentApproval,
+        deleteComment,
         addComment,
         isDarkMode,
         toggleDarkMode,

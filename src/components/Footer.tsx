@@ -47,25 +47,23 @@ export const Footer: React.FC = () => {
   const [loginError, setLoginError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleAdminLoginSubmit = (e: React.FormEvent) => {
+  const handleAdminLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
     setIsSubmitting(true);
+    const res = await verifyLogin(emailInput, passwordInput);
+    setIsSubmitting(false);
 
-    setTimeout(() => {
-      setIsSubmitting(false);
-      const res = verifyLogin(emailInput, passwordInput);
-
-      if (res.success) {
-        setAdminLoginModalOpen(false);
-        setEmailInput('');
-        setPasswordInput('');
-        setLoginError('');
-        navigateTo('admin');
-      } else {
-        setLoginError(res.error || 'इमेल वा पासवर्ड मिलेन। कृपया सही विवरण प्रविष्ट गर्नुहोस्।');
-      }
-    }, 400);
+    if (res.success) {
+      setAdminLoginModalOpen(false);
+      setEmailInput('');
+      setPasswordInput('');
+      setLoginError('');
+      navigateTo('admin');
+    } else {
+      setPasswordInput('');
+      setLoginError(res.error || 'इमेल वा पासवर्ड मिलेन। कृपया सही विवरण प्रविष्ट गर्नुहोस्।');
+    }
   };
 
   return (
@@ -215,7 +213,7 @@ export const Footer: React.FC = () => {
               <p className="flex items-center gap-2.5">
                 <Mail className="w-4 h-4 text-red-500 shrink-0" />
                 <span className="text-slate-300 font-medium">
-                  {siteSettings.contact_email || 'pabansubedi128@gmail.com'}
+                  {siteSettings.contact_email}
                 </span>
               </p>
             </div>

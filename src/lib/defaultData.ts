@@ -1,40 +1,4 @@
-import { UserProfile, Category, Post, Advertisement, SiteSettings, Comment } from '../types';
-
-export const INITIAL_USERS: UserProfile[] = [
-  {
-    id: 'user-admin-1',
-    user_id: 'usr_paban_subedi',
-    role: 'super_admin',
-    full_name: 'पवन सुवेदी (Paban Subedi)',
-    email: 'pabansubedi128@gmail.com',
-    password: 'paban@admin2026',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
-    bio: 'प्रधान सम्पादक तथा संस्थापक, News Paban Subedi',
-    phone: '+977-9800000000'
-  },
-  {
-    id: 'user-editor-1',
-    user_id: 'usr_bikram_thapa',
-    role: 'editor',
-    full_name: 'विक्रम थापा (Bikram Thapa)',
-    email: 'editor@pabansubedi.com.np',
-    password: 'editor@2026',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
-    bio: 'समाचार सम्पादक, राजनीतिक ब्युरो',
-    phone: '+977-9811111111'
-  },
-  {
-    id: 'user-reporter-1',
-    user_id: 'usr_sunita_sharma',
-    role: 'reporter',
-    full_name: 'सुनिता शर्मा (Sunita Sharma)',
-    email: 'reporter@pabansubedi.com.np',
-    password: 'reporter@2026',
-    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80',
-    bio: 'विशेष संवाददाता, अर्थ तथा समसामयिक मामिला',
-    phone: '+977-9822222222'
-  }
-];
+import { Category, Post, Advertisement, SiteSettings, Comment } from '../types';
 
 export const INITIAL_CATEGORIES: Category[] = [
   { id: 'cat-politics', name: 'राजनीति', name_en: 'Politics', slug: 'politics', order_index: 1, color: '#dc2626', is_active: true },
@@ -321,7 +285,8 @@ export const INITIAL_SITE_SETTINGS: SiteSettings = {
   logo_dark_url: '',
   favicon_url: '',
   watermark_url: '',
-  contact_email: 'pabansubedi128@gmail.com',
+  contact_email: '', // set it in Admin -> Site settings
+  comments_need_approval: false,
   contact_phone: '+977-1-4400000, 9800000000',
   office_address: 'अनामनगर, काठमाडौँ, नेपाल (Anamnagar, Kathmandu)',
   press_council_reg_no: '१२८४/०८०-८१',

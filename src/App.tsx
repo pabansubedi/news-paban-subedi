@@ -35,6 +35,79 @@ const SyncErrorBanner: React.FC = () => {
   );
 };
 
+/**
+ * Opens when a staff member follows the "reset password" link from their e-mail.
+ */
+const PasswordRecoveryModal: React.FC = () => {
+  const { changeUserPassword } = useNewsApp();
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState('');
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    const h = () => setOpen(true);
+    window.addEventListener('news-password-recovery', h);
+    return () => window.removeEventListener('news-password-recovery', h);
+  }, []);
+
+  if (!open) return null;
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await changeUserPassword(value);
+    if (res.ok) {
+      setOpen(false);
+      setValue('');
+    } else {
+      setMsg(res.error || 'पासवर्ड बदल्न सकिएन।');
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-[10000] bg-black/70 flex items-center justify-center p-4">
+      <form onSubmit={save} className="bg-white dark:bg-slate-900 rounded-2xl p-6 w-full max-w-sm space-y-3 shadow-2xl">
+        <h3 className="font-extrabold text-slate-900 dark:text-white">नयाँ पासवर्ड राख्नुहोस्</h3>
+        <input
+          type="password"
+          autoFocus
+          required
+          minLength={6}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="कम्तिमा ६ अक्षर"
+          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white outline-none"
+        />
+        {msg && <p className="text-xs text-red-600">{msg}</p>}
+        <button type="submit" className="w-full py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold">
+          सुरक्षित गर्नुहोस्
+        </button>
+      </form>
+    </div>
+  );
+};
+
+/**
+ * /admin is now a real URL, so a visitor can open it directly.
+ * Staff-only: everyone else gets the login prompt instead of the dashboard.
+ */
+const AdminGate: React.FC = () => {
+  const { currentRole, setAdminLoginModalOpen } = useNewsApp();
+  useEffect(() => {
+    if (currentRole === 'public') setAdminLoginModalOpen(true);
+  }, [currentRole]);
+  if (currentRole !== 'public') return <AdminDashboard />;
+  return (
+    <div className="max-w-md mx-auto px-4 py-20 text-center">
+      <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">स्टाफ लगइन आवश्यक छ</h2>
+      <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">यो पृष्ठ केवल अधिकृत कर्मचारीका लागि हो।</p>
+      <button
+        onClick={() => setAdminLoginModalOpen(true)}
+        className="mt-5 px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold"
+      >
+        लगइन गर्नुहोस्
+      </button>
+    </div>
+  );
+};
+
 const MainLayout: React.FC = () => {
   const { currentRoute, siteSettings, posts, currentRole } = useNewsApp();
 
@@ -125,9 +198,7 @@ const MainLayout: React.FC = () => {
           <ArticleDetail slug={currentRoute.param} />
         )}
 
-        {currentRoute.page === 'admin' && (
-          <AdminDashboard />
-        )}
+        {currentRoute.page === 'admin' && <AdminGate />}
 
         {currentRoute.page === 'docs' && (
           currentRole === 'super_admin' ? (
@@ -140,6 +211,7 @@ const MainLayout: React.FC = () => {
 
       <Footer />
       <SyncErrorBanner />
+      <PasswordRecoveryModal />
     </div>
   );
 };

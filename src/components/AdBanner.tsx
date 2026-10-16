@@ -61,7 +61,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({ slot, className = '' }) => {
             className="flex-1 flex items-center justify-center overflow-hidden max-h-16 rounded group"
           >
             {ad.script_code ? (
-              <div dangerouslySetInnerHTML={{ __html: ad.script_code }} />
+              <div className="max-w-full overflow-hidden" dangerouslySetInnerHTML={{ __html: ad.script_code }} />
             ) : (
               <img
                 src={ad.image_url}
@@ -97,9 +97,9 @@ export const AdBanner: React.FC<AdBannerProps> = ({ slot, className = '' }) => {
           className="block w-full max-w-[728px] overflow-hidden rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:opacity-95 transition shadow-xs group"
         >
           {ad.script_code ? (
-            <div dangerouslySetInnerHTML={{ __html: ad.script_code }} />
+            <div className="max-w-full overflow-hidden" dangerouslySetInnerHTML={{ __html: ad.script_code }} />
           ) : (
-            <div className="relative h-[90px] w-full flex items-center justify-center bg-slate-100 dark:bg-slate-800">
+            <div className="relative aspect-[728/90] w-full flex items-center justify-center bg-slate-100 dark:bg-slate-800">
               <img
                 src={ad.image_url}
                 alt={ad.title}
@@ -127,7 +127,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({ slot, className = '' }) => {
           className="block rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs hover:shadow-md transition group"
         >
           {ad.script_code ? (
-            <div dangerouslySetInnerHTML={{ __html: ad.script_code }} />
+            <div className="max-w-full overflow-hidden" dangerouslySetInnerHTML={{ __html: ad.script_code }} />
           ) : (
             <div className="aspect-[300/250] w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
               <img
@@ -157,7 +157,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({ slot, className = '' }) => {
           className="block max-w-2xl mx-auto rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xs hover:opacity-95 transition"
         >
           {ad.script_code ? (
-            <div dangerouslySetInnerHTML={{ __html: ad.script_code }} />
+            <div className="max-w-full overflow-hidden" dangerouslySetInnerHTML={{ __html: ad.script_code }} />
           ) : (
             <img
               src={ad.image_url}
@@ -184,7 +184,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({ slot, className = '' }) => {
         className="block w-full max-w-5xl mx-auto rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-xs hover:opacity-95 transition"
       >
         {ad.script_code ? (
-          <div dangerouslySetInnerHTML={{ __html: ad.script_code }} />
+          <div className="max-w-full overflow-hidden" dangerouslySetInnerHTML={{ __html: ad.script_code }} />
         ) : (
           <div className="h-28 sm:h-36 w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
             <img

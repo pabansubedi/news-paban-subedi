@@ -31,15 +31,20 @@ interface ArticleDetailProps {
 export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
   const {
     posts,
+    allPosts,
     categories,
     comments,
     addComment,
     incrementViews,
     siteSettings,
-    navigateTo
+    navigateTo,
+    currentRole,
+    postsLoaded
   } = useNewsApp();
 
-  const post = posts.find((p) => p.slug === slug);
+  // Direct links must never expose drafts / pending / rejected posts to readers
+  const found = (currentRole !== 'public' ? allPosts : posts).find((p) => p.slug === slug);
+  const post = found && (found.status === 'published' || currentRole !== 'public') ? found : undefined;
   const [copied, setCopied] = useState(false);
   const [commentName, setCommentName] = useState('');
   const [commentText, setCommentText] = useState('');
@@ -51,10 +56,56 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
 
   // Increment view count on mount
   useEffect(() => {
-    if (post) {
+    if (post && post.status === 'published') {
       incrementViews(post.id);
     }
   }, [post?.id]);
+
+  // Page title + share/SEO meta tags follow the article (real URL per news)
+  useEffect(() => {
+    if (!post) return;
+    const prevTitle = document.title;
+    document.title = `${post.title} | ${siteSettings.site_title}`;
+    const restore: Array<() => void> = [];
+    const setTag = (selector: string, create: () => HTMLElement, attr: string, value: string) => {
+      let el = document.head.querySelector(selector) as HTMLElement | null;
+      const existed = !!el;
+      if (!el) {
+        el = create();
+        document.head.appendChild(el);
+      }
+      const old = el.getAttribute(attr);
+      el.setAttribute(attr, value);
+      restore.push(() => {
+        if (!existed) el!.remove();
+        else if (old !== null) el!.setAttribute(attr, old);
+      });
+    };
+    const meta = (key: 'name' | 'property', name: string) => () => {
+      const m = document.createElement('meta');
+      m.setAttribute(key, name);
+      return m;
+    };
+    const url = `${window.location.origin}/news/${encodeURIComponent(post.slug)}`;
+    const desc = (post.excerpt || post.content || '').replace(/\s+/g, ' ').slice(0, 160);
+    setTag('meta[name="description"]', meta('name', 'description'), 'content', desc);
+    setTag('meta[property="og:title"]', meta('property', 'og:title'), 'content', post.title);
+    setTag('meta[property="og:description"]', meta('property', 'og:description'), 'content', desc);
+    setTag('meta[property="og:url"]', meta('property', 'og:url'), 'content', url);
+    setTag('meta[property="og:type"]', meta('property', 'og:type'), 'content', 'article');
+    if (post.featured_image && /^https?:/i.test(post.featured_image)) {
+      setTag('meta[property="og:image"]', meta('property', 'og:image'), 'content', post.featured_image);
+    }
+    setTag('link[rel="canonical"]', () => {
+      const l = document.createElement('link');
+      l.setAttribute('rel', 'canonical');
+      return l;
+    }, 'href', url);
+    return () => {
+      document.title = prevTitle;
+      restore.forEach((fn) => fn());
+    };
+  }, [post?.slug, post?.title]);
 
   // Clean up audio on unmount
   useEffect(() => {
@@ -80,6 +131,14 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
     document.addEventListener('copy', handleCopy);
     return () => document.removeEventListener('copy', handleCopy);
   }, []);
+
+  if (!post && !postsLoaded) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-24 text-center text-slate-500 dark:text-slate-400 text-sm">
+        समाचार लोड हुँदैछ...
+      </div>
+    );
+  }
 
   if (!post) {
     return (
@@ -205,7 +264,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
       </div>
 
       {/* Title */}
-      <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-900 dark:text-white leading-tight tracking-tight">
+      <h1 className="break-words text-3xl sm:text-4xl lg:text-5xl font-black text-slate-900 dark:text-white leading-tight tracking-tight">
         {post.title}
       </h1>
 
@@ -412,7 +471,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
       <div className="prose prose-lg dark:prose-invert max-w-none space-y-6 text-slate-800 dark:text-slate-200 text-lg leading-relaxed font-normal">
         {paragraphs.map((para, index) => (
           <React.Fragment key={index}>
-            <p className="leading-relaxed">{para}</p>
+            <p className="leading-relaxed break-words">{para}</p>
             {/* Ad Location 4: Inside Article Detail Page (Between paragraphs, after 2nd paragraph) */}
             {index === 1 && (
               <div className="no-print">
@@ -487,7 +546,9 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
             </button>
             {commentSuccess && (
               <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold">
-                ✓ तपाईंको प्रतिक्रिया सफलतापूर्वक दर्ता भयो!
+                {siteSettings.comments_need_approval
+                  ? '✓ तपाईंको प्रतिक्रिया प्राप्त भयो। सम्पादकले स्वीकृत गरेपछि देखिन्छ।'
+                  : '✓ तपाईंको प्रतिक्रिया सफलतापूर्वक दर्ता भयो!'}
               </span>
             )}
           </div>

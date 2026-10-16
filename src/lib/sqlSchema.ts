@@ -5,6 +5,11 @@
  */
 
 export const SUPABASE_SQL_SCHEMA = `-- ==============================================================================
+-- !! WARNING: this is the BASE schema (first-time setup). Its policies are OPEN (USING true).
+-- !! If you already ran staff-auth.sql, DO NOT run this again: it would undo the staff-only
+-- !! security. Run staff-auth.sql instead (safe to re-run).
+-- ==============================================================================
+-- ==============================================================================
 -- NEWS PABAN SUBEDI (news.pabansubedi.com.np) - COMPLETE DATABASE & RLS SCHEMA
 -- Target Database: Supabase PostgreSQL (Production-Ready)
 -- Note: This script is 100% idempotent and can be safely re-run at any time.
@@ -229,7 +234,7 @@ CREATE TABLE IF NOT EXISTS public.site_settings (
     logo_dark_url TEXT,
     favicon_url TEXT,
     watermark_url TEXT,
-    contact_email TEXT DEFAULT 'pabansubedi128@gmail.com',
+    contact_email TEXT DEFAULT '',
     contact_phone TEXT DEFAULT '+977-1-4400000, 9800000000',
     office_address TEXT DEFAULT 'अनामनगर, काठमाडौँ, नेपाल',
     press_council_reg_no TEXT DEFAULT '१२८४/०८०-८१',
@@ -256,7 +261,7 @@ ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS logo_url TEXT;
 ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS logo_dark_url TEXT;
 ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS favicon_url TEXT;
 ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS watermark_url TEXT;
-ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS contact_email TEXT DEFAULT 'pabansubedi128@gmail.com';
+ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS contact_email TEXT DEFAULT '';
 ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS contact_phone TEXT DEFAULT '+977-1-4400000, 9800000000';
 ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS office_address TEXT DEFAULT 'अनामनगर, काठमाडौँ, नेपाल';
 ALTER TABLE public.site_settings ADD COLUMN IF NOT EXISTS press_council_reg_no TEXT DEFAULT '१२८४/०८०-८१';
@@ -295,7 +300,7 @@ INSERT INTO public.site_settings (
     'सत्य, तथ्य र निष्पक्ष पत्रकारिताको संवाहक',
     'news.pabansubedi.com.np',
     'News Paban Subedi (news.pabansubedi.com.np) - नेपालको अग्रणी अनलाइन समाचार पोर्टल।',
-    'pabansubedi128@gmail.com',
+    '',
     '+977-1-4400000, 9800000000',
     'अनामनगर, काठमाडौँ, नेपाल',
     '१२८४/०८०-८१',
