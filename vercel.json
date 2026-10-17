@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/news/:slug",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": "(.*)(facebookexternalhit|Facebot|WhatsApp|Twitterbot|LinkedInBot|TelegramBot|Viber|Slackbot|Discordbot|Pinterest|Googlebot|bingbot)(.*)"
+        }
+      ],
+      "destination": "/api/og?slug=:slug"
+    },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}
