@@ -141,16 +141,34 @@ const MainLayout: React.FC = () => {
     }
 
     // Dynamic Favicon update
-    if (siteSettings.favicon_url) {
-      let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
-      if (!link) {
-        link = document.createElement('link');
-        link.rel = 'icon';
-        document.head.appendChild(link);
-      }
-      link.href = siteSettings.favicon_url;
-    }
   }, [currentRoute, siteSettings, posts]);
+
+  // Favicon chosen in Admin -> Site settings (the default one stays if it cannot be loaded)
+  useEffect(() => {
+    const url = siteSettings.favicon_url;
+    if (!url) return;
+    const probe = new Image();
+    probe.onload = () => {
+      document.querySelectorAll("link[rel~='icon']").forEach((l) => l.remove());
+      const link = document.createElement('link');
+      link.rel = 'icon';
+      link.href = url;
+      const type = url.startsWith('data:')
+        ? url.slice(5, url.indexOf(';'))
+        : /\.svg(\?|$)/i.test(url)
+          ? 'image/svg+xml'
+          : /\.png(\?|$)/i.test(url)
+            ? 'image/png'
+            : /\.(jpe?g)(\?|$)/i.test(url)
+              ? 'image/jpeg'
+              : /\.ico(\?|$)/i.test(url)
+                ? 'image/x-icon'
+                : '';
+      if (type) link.type = type;
+      document.head.appendChild(link);
+    };
+    probe.src = url;
+  }, [siteSettings.favicon_url]);
 
   // Global copy attribution across the portal
   useEffect(() => {
