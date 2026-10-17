@@ -332,6 +332,15 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const handleSavePost = (submitStatus: PostStatus) => {
+    // saving a LIVE news as draft / review takes it offline: ask first
+    const livePost = editingPostId ? posts.find((p) => p.id === editingPostId) : undefined;
+    if (
+      livePost?.status === 'published' &&
+      submitStatus !== 'published' &&
+      !window.confirm('यो समाचार अहिले प्रकाशित छ। ड्राफ्ट / समीक्षामा पठाए पाठकले देख्न पाउँदैनन्। जारी राख्ने?')
+    ) {
+      return;
+    }
     if (!postTitle.trim() || !postContent.trim()) {
       alert('कृपया शीर्षक र समाचारको मुख्य विवरण भर्नुहोस्।');
       return;
@@ -1076,6 +1085,17 @@ export const AdminDashboard: React.FC = () => {
 
             {/* ACTION BUTTONS BASED ON USER ROLE */}
             <div className="flex flex-wrap items-center justify-end gap-3 pt-6 border-t border-slate-200 dark:border-slate-800">
+              {currentRole === 'editor' &&
+                editingPostId &&
+                posts.find((p) => p.id === editingPostId)?.status === 'published' && (
+                  <button
+                    type="button"
+                    onClick={() => handleSavePost('published')}
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold cursor-pointer"
+                  >
+                    प्रकाशित समाचार अपडेट गर्नुहोस्
+                  </button>
+                )}
               <button
                 type="button"
                 onClick={() => handleSavePost('draft')}

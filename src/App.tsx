@@ -9,8 +9,15 @@ import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { HomePage } from './components/HomePage';
 import { ArticleDetail } from './components/ArticleDetail';
-import { AdminDashboard } from './components/admin/AdminDashboard';
-import { DocsView } from './components/DocsView';
+
+// Heavy staff-only screens are split into their own files and downloaded only when opened
+const AdminDashboard = React.lazy(() =>
+  import('./components/admin/AdminDashboard').then((m) => ({ default: m.AdminDashboard }))
+);
+const DocsView = React.lazy(() => import('./components/DocsView').then((m) => ({ default: m.DocsView })));
+const lazyFallback = (
+  <div className="max-w-md mx-auto px-4 py-20 text-center text-sm text-slate-500">लोड हुँदैछ...</div>
+);
 
 /**
  * Shows a visible warning to logged-in staff when a change could NOT be saved to Supabase
@@ -89,11 +96,16 @@ const PasswordRecoveryModal: React.FC = () => {
  * Staff-only: everyone else gets the login prompt instead of the dashboard.
  */
 const AdminGate: React.FC = () => {
-  const { currentRole, setAdminLoginModalOpen } = useNewsApp();
+  const { currentRole, authReady, setAdminLoginModalOpen } = useNewsApp();
+  // wait until the saved login is restored, else a logged-in admin reloading /admin
+  // would see the login box for a moment
   useEffect(() => {
-    if (currentRole === 'public') setAdminLoginModalOpen(true);
-  }, [currentRole]);
-  if (currentRole !== 'public') return <AdminDashboard />;
+    if (authReady && currentRole === 'public') setAdminLoginModalOpen(true);
+  }, [authReady, currentRole]);
+  if (!authReady) {
+    return <div className="max-w-md mx-auto px-4 py-20 text-center text-sm text-slate-500">लोड हुँदैछ...</div>;
+  }
+  if (currentRole !== 'public') return <React.Suspense fallback={lazyFallback}><AdminDashboard /></React.Suspense>;
   return (
     <div className="max-w-md mx-auto px-4 py-20 text-center">
       <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">स्टाफ लगइन आवश्यक छ</h2>
@@ -143,6 +155,10 @@ const MainLayout: React.FC = () => {
   // Global copy attribution across the portal
   useEffect(() => {
     const handleGlobalCopy = (e: ClipboardEvent) => {
+      // never touch copying inside the admin panel or from form fields
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (window.location.pathname.startsWith('/admin')) return;
       const selection = window.getSelection();
       if (!selection || selection.toString().trim().length === 0) return;
       const text = selection.toString();
@@ -202,7 +218,7 @@ const MainLayout: React.FC = () => {
 
         {currentRoute.page === 'docs' && (
           currentRole === 'super_admin' ? (
-            <DocsView />
+            <React.Suspense fallback={lazyFallback}><DocsView /></React.Suspense>
           ) : (
             <HomePage />
           )

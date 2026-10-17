@@ -217,63 +217,21 @@ export const INITIAL_POSTS: Post[] = [
   }
 ];
 
-export const INITIAL_ADS: Advertisement[] = [
-  {
-    id: 'ad-1',
-    placement_slot: 'header_top',
-    title: 'नेपाल टेलिकम ५जी अल्ट्रा फाइबर इन्टरनेट अफर',
-    image_url: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=728&h=90&q=80',
-    redirect_url: 'https://ntc.net.np',
-    is_active: true,
-    views_count: 12430,
-    clicks_count: 512,
-    advertiser_name: 'नेपाल टेलिकम'
-  },
-  {
-    id: 'ad-2',
-    placement_slot: 'below_hero',
-    title: 'नबिल बैंक स्मार्ट डिजिटल बैंकिङ - शून्य शुल्कमा खाता खोल्नुहोस्',
-    image_url: 'https://images.unsplash.com/photo-1563986768609-322da13575f3?auto=format&fit=crop&w=1200&h=120&q=80',
-    redirect_url: 'https://nabilbank.com',
-    is_active: true,
-    views_count: 9810,
-    clicks_count: 420,
-    advertiser_name: 'नबिल बैंक लिमिटेड'
-  },
-  {
-    id: 'ad-3',
-    placement_slot: 'sidebar_top',
-    title: 'सिजी मोटर्स - नयाँ विद्युतीय कार (EV) बुकिङ खुला',
-    image_url: 'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?auto=format&fit=crop&w=300&h=250&q=80',
-    redirect_url: 'https://cgmotors.com.np',
-    is_active: true,
-    views_count: 8540,
-    clicks_count: 310,
-    advertiser_name: 'सिजी मोटर्स'
-  },
-  {
-    id: 'ad-4',
-    placement_slot: 'in_article',
-    title: 'नेपाल इन्भेष्टमेन्ट मेगा बैंक - सहज मुद्दती निक्षेप योजना',
-    image_url: 'https://images.unsplash.com/photo-1559526324-4b87b5e36e44?auto=format&fit=crop&w=800&h=150&q=80',
-    redirect_url: 'https://nimb.com.np',
-    is_active: true,
-    views_count: 5620,
-    clicks_count: 198,
-    advertiser_name: 'नेपाल इन्भेष्टमेन्ट मेगा बैंक'
-  },
-  {
-    id: 'ad-5',
-    placement_slot: 'sticky_footer',
-    title: 'खल्ती डिजिटल वालेट - क्यासब्याक महोत्सव',
-    image_url: 'https://images.unsplash.com/photo-1556742049-0a67c5574f73?auto=format&fit=crop&w=1200&h=60&q=80',
-    redirect_url: 'https://khalti.com',
-    is_active: true,
-    views_count: 14200,
-    clicks_count: 670,
-    advertiser_name: 'खल्ती वालेट'
-  }
-];
+// Empty, inactive placeholders: they only give the admin the 5 slot cards to fill in.
+// (Before, fake "Nepal Telecom / Nabil Bank" demo ads were shown to every reader.)
+export const INITIAL_ADS: Advertisement[] = (
+  ['header_top', 'below_hero', 'sidebar_top', 'in_article', 'sticky_footer'] as const
+).map((slot, i) => ({
+  id: `ad-${i + 1}`,
+  placement_slot: slot,
+  title: '',
+  image_url: '',
+  redirect_url: '',
+  is_active: false,
+  views_count: 0,
+  clicks_count: 0,
+  advertiser_name: ''
+}));
 
 export const INITIAL_SITE_SETTINGS: SiteSettings = {
   id: 'site-settings-main',

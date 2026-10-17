@@ -34,6 +34,7 @@ interface NewsAppContextType {
   // Current user & role (Strictly confidential; defaults to 'public' for portal visitors)
   currentUser: UserProfile;
   currentRole: UserRole;
+  authReady: boolean; // saved login has been checked
   users: UserProfile[];
   addUser: (user: NewStaffInput) => Promise<{ ok: boolean; error?: string; needsConfirm?: boolean }>;
   updateUser: (id: string, user: Partial<UserProfile>) => void;
@@ -245,10 +246,10 @@ const parseLocation = (): Route => {
 export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Persistence keys
   const SETTINGS_KEY = 'nepal_news_settings_v2';
-  const POSTS_KEY = 'nepal_news_posts_v2';
+  const POSTS_KEY = 'nepal_news_posts_v3'; // v3: drops cached demo news
   const CATEGORIES_KEY = 'nepal_news_categories_v2';
-  const ADS_KEY = 'nepal_news_ads_v2';
-  const COMMENTS_KEY = 'nepal_news_comments_v2';
+  const ADS_KEY = 'nepal_news_ads_v3'; // v3: drops cached demo ads
+  const COMMENTS_KEY = 'nepal_news_comments_v3';
   // Staff identity comes ONLY from Supabase Auth (see "STAFF LOGIN" below).
   // The old fake login kept plaintext passwords in LocalStorage: wipe them.
   useEffect(() => {
@@ -261,6 +262,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [currentRole, setCurrentRole] = useState<UserRole>('public');
   const [currentUser, setCurrentUser] = useState<UserProfile>(GUEST_USER);
+  const [authReady, setAuthReady] = useState(false);
 
   const [adminLoginModalOpen, setAdminLoginModalOpen] = useState(false);
 
@@ -308,9 +310,9 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [posts, setPosts] = useState<Post[]>(() => {
     try {
       const saved = localStorage.getItem(POSTS_KEY);
-      return saved ? JSON.parse(saved) : INITIAL_POSTS;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_POSTS;
+      return [];
     }
   });
 
@@ -328,9 +330,9 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [comments, setComments] = useState<Comment[]>(() => {
     try {
       const saved = localStorage.getItem(COMMENTS_KEY);
-      return saved ? JSON.parse(saved) : INITIAL_COMMENTS;
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_COMMENTS;
+      return [];
     }
   });
 
@@ -396,6 +398,8 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Every browser reads the same data from Supabase (on load, on focus, every
   // 15s, and instantly via Realtime). LocalStorage is only a fast first-paint cache.
   // ---------------------------------------------------------------------------
+  const roleRef = useRef(currentRole);
+  roleRef.current = currentRole;
   const postsRef = useRef<Post[]>(posts);
   postsRef.current = posts;
   const categoriesRef = useRef<Category[]>(categories);
@@ -443,9 +447,9 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const [s, c, p, a, cm, st] = await Promise.all([
           supabase.from('site_settings').select('*').limit(1).maybeSingle(),
           supabase.from('categories').select('*').order('order_index', { ascending: true }),
-          supabase.from('posts').select('*').order('created_at', { ascending: false }),
+          supabase.from('posts').select('*').order('created_at', { ascending: false }).limit(1000),
           supabase.from('advertisements').select('*'),
-          supabase.from('comments').select('*').order('created_at', { ascending: false }),
+          supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(500),
           supabase.from('site_stats').select('total_visitors').eq('id', 1).maybeSingle()
         ]);
 
@@ -483,7 +487,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
           persist(ADS_KEY, merged);
         } else if (a.error) console.warn('advertisements fetch failed:', a.error.message);
 
-        if (!cm.error && cm.data && cm.data.length > 0) {
+        if (!cm.error && cm.data) {
           const formatted = cm.data.map(mapComment);
           setComments(formatted);
           persist(COMMENTS_KEY, formatted);
@@ -520,7 +524,12 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
     window.addEventListener('online', onVisible);
-    const poll = setInterval(onVisible, 15000);
+    // staff re-check every 15 s, readers every 60 s (Realtime pushes changes instantly anyway)
+    let tick = 0;
+    const poll = setInterval(() => {
+      tick++;
+      if (roleRef.current !== 'public' || tick % 4 === 0) onVisible();
+    }, 15000);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
@@ -669,7 +678,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const user = data.session?.user ?? null;
       const profile = await loadProfile(user);
       if (user && !profile) supabase.auth.signOut(); // a login without staff access is not kept
-    });
+    }).catch(() => {}).finally(() => setAuthReady(true));
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') window.dispatchEvent(new CustomEvent('news-password-recovery'));
       // never await Supabase calls directly inside this callback (can deadlock): defer
@@ -1138,6 +1147,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
       value={{
         currentUser,
         currentRole,
+        authReady,
         users,
         addUser,
         updateUser,

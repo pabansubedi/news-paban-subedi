@@ -22,7 +22,7 @@ interface HomePageProps {
 }
 
 export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery }) => {
-  const { posts, categories, navigateTo, siteSettings } = useNewsApp();
+  const { posts, categories, navigateTo, siteSettings, postsLoaded } = useNewsApp();
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
 
   // ONLY show posts that are approved & published by Admin!
@@ -32,7 +32,8 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
   const filteredPosts = publishedPosts.filter((post) => {
     if (categoryFilter) {
       const cat = categories.find((c) => c.slug === categoryFilter);
-      if (cat && post.category_id !== cat.id) return false;
+      // unknown category (or not loaded yet) must show nothing, never ALL posts
+      if (!cat || post.category_id !== cat.id) return false;
     }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -67,11 +68,28 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
   };
 
   const handleCopyLink = (slug: string) => {
-    const url = `${window.location.origin}/news/${slug}`;
-    navigator.clipboard.writeText(url);
+    const url = `${window.location.origin}/news/${encodeURIComponent(slug)}`;
+    navigator.clipboard?.writeText(url).catch(() => {});
     setCopiedSlug(slug);
     setTimeout(() => setCopiedSlug(null), 2500);
   };
+
+  if (!postsLoaded && posts.length === 0) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-8 animate-pulse space-y-6" aria-busy="true">
+        <div className="h-64 sm:h-96 rounded-2xl bg-slate-200 dark:bg-slate-800" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="space-y-3">
+              <div className="h-40 rounded-xl bg-slate-200 dark:bg-slate-800" />
+              <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-800" />
+              <div className="h-4 w-1/2 rounded bg-slate-200 dark:bg-slate-800" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
@@ -163,7 +181,7 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
                     </span>
                     <div className="flex items-center gap-2">
                       <a
-                        href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.origin + '/news/' + heroPost.slug)}`}
+                        href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.origin + '/news/' + encodeURIComponent(heroPost.slug))}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white font-bold text-[10px] transition"
@@ -172,7 +190,7 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
                         फेसबुक
                       </a>
                       <a
-                        href={`https://api.whatsapp.com/send?text=${encodeURIComponent(heroPost.title + ' ' + window.location.origin + '/news/' + heroPost.slug)}`}
+                        href={`https://api.whatsapp.com/send?text=${encodeURIComponent(heroPost.title + ' ' + window.location.origin + '/news/' + encodeURIComponent(heroPost.slug))}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="px-2.5 py-1 rounded bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-[10px] transition"
@@ -216,7 +234,7 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
                   className="group cursor-pointer bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:shadow-md transition flex gap-3.5 items-start"
                 >
                   <div className="relative w-28 h-20 sm:w-32 sm:h-22 rounded-lg overflow-hidden shrink-0 bg-slate-100 dark:bg-slate-800">
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={post.featured_image}
                       alt={post.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
@@ -291,7 +309,7 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
                     className="cursor-pointer group bg-white dark:bg-slate-900 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 hover:shadow-md transition"
                   >
                     <div className="aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                      <img
+                      <img loading="lazy" decoding="async"
                         src={post.featured_image}
                         alt={post.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
@@ -342,7 +360,7 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
                     className="cursor-pointer group bg-white dark:bg-slate-900 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 hover:shadow-md transition"
                   >
                     <div className="aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                      <img
+                      <img loading="lazy" decoding="async"
                         src={post.featured_image}
                         alt={post.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
@@ -393,7 +411,7 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
                     className="cursor-pointer group bg-white dark:bg-slate-900 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 hover:shadow-md transition"
                   >
                     <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                      <img
+                      <img loading="lazy" decoding="async"
                         src={post.featured_image}
                         alt={post.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition duration-300"

@@ -36,6 +36,38 @@ CREATE POLICY posts_select ON public.posts FOR SELECT USING (
     OR (public.get_auth_role() = 'reporter' AND author_id = auth.uid())
 );
 
+-- 4. editors can fix a typo in a LIVE news (it stays published); only a Super Admin can
+--    publish a news that is not live yet
+DROP POLICY IF EXISTS posts_update ON public.posts;
+CREATE POLICY posts_update ON public.posts FOR UPDATE
+USING (
+    public.get_auth_role() IN ('super_admin', 'editor')
+    OR (public.get_auth_role() = 'reporter' AND author_id = auth.uid())
+)
+WITH CHECK (
+    public.get_auth_role() = 'super_admin'
+    OR (public.get_auth_role() = 'editor' AND status IN ('draft', 'pending', 'rejected', 'published'))
+    OR (public.get_auth_role() = 'reporter' AND author_id = auth.uid() AND status IN ('draft', 'pending'))
+);
+
+CREATE OR REPLACE FUNCTION public.posts_guard_publish()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status = 'published'
+       AND OLD.status IS DISTINCT FROM 'published'
+       AND auth.uid() IS NOT NULL
+       AND public.get_auth_role() <> 'super_admin' THEN
+        RAISE EXCEPTION 'Only a Super Admin can publish a post';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS posts_publish_guard ON public.posts;
+CREATE TRIGGER posts_publish_guard
+    BEFORE UPDATE ON public.posts
+    FOR EACH ROW EXECUTE FUNCTION public.posts_guard_publish();
+
 -- CHECK: should show the column and the policy
 SELECT column_name FROM information_schema.columns
 WHERE table_schema = 'public' AND table_name = 'site_settings' AND column_name = 'comments_need_approval';

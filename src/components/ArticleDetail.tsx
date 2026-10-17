@@ -116,22 +116,6 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
     };
   }, []);
 
-  // Automatic copy-paste attribution with portal URL
-  useEffect(() => {
-    const handleCopy = (e: ClipboardEvent) => {
-      const selection = window.getSelection();
-      if (!selection || selection.toString().trim().length === 0) return;
-      const selectedText = selection.toString();
-      const currentUrl = window.location.href;
-      const attribution = `\n\n--------------------------------------------\nस्रोत: News Paban Subedi (${currentUrl})\nप्रतिलिपि अधिकार © News Paban Subedi | सर्वाधिकार सुरक्षित।`;
-      e.clipboardData?.setData('text/plain', selectedText + attribution);
-      e.preventDefault();
-    };
-
-    document.addEventListener('copy', handleCopy);
-    return () => document.removeEventListener('copy', handleCopy);
-  }, []);
-
   if (!post && !postsLoaded) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-24 text-center text-slate-500 dark:text-slate-400 text-sm">
@@ -199,7 +183,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
   };
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
+    navigator.clipboard?.writeText(window.location.href).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
@@ -360,7 +344,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
       {/* Featured Image & Caption */}
       <figure className="mb-8">
         <div className="relative rounded-2xl overflow-hidden aspect-[16/10] bg-slate-100 dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-800">
-          <img
+          <img loading="lazy" decoding="async"
             src={post.featured_image}
             alt={post.title}
             className="w-full h-full object-cover"
@@ -592,7 +576,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
                 className="cursor-pointer group bg-white dark:bg-slate-900 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 hover:shadow-md transition"
               >
                 <div className="aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
-                  <img
+                  <img loading="lazy" decoding="async"
                     src={rel.featured_image}
                     alt={rel.title}
                     className="w-full h-full object-cover group-hover:scale-105 transition"

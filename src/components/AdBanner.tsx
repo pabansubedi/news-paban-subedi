@@ -63,7 +63,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({ slot, className = '' }) => {
             {ad.script_code ? (
               <div className="max-w-full overflow-hidden" dangerouslySetInnerHTML={{ __html: ad.script_code }} />
             ) : (
-              <img
+              <img loading="lazy" decoding="async"
                 src={ad.image_url}
                 alt={ad.title}
                 className="max-h-14 object-contain mx-auto transition-transform group-hover:scale-102"
@@ -100,7 +100,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({ slot, className = '' }) => {
             <div className="max-w-full overflow-hidden" dangerouslySetInnerHTML={{ __html: ad.script_code }} />
           ) : (
             <div className="relative aspect-[728/90] w-full flex items-center justify-center bg-slate-100 dark:bg-slate-800">
-              <img
+              <img loading="lazy" decoding="async"
                 src={ad.image_url}
                 alt={ad.title}
                 className="h-full w-full object-cover transition-transform group-hover:scale-101"
@@ -130,7 +130,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({ slot, className = '' }) => {
             <div className="max-w-full overflow-hidden" dangerouslySetInnerHTML={{ __html: ad.script_code }} />
           ) : (
             <div className="aspect-[300/250] w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-              <img
+              <img loading="lazy" decoding="async"
                 src={ad.image_url}
                 alt={ad.title}
                 className="w-full h-full object-cover transition-transform group-hover:scale-103"
@@ -159,7 +159,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({ slot, className = '' }) => {
           {ad.script_code ? (
             <div className="max-w-full overflow-hidden" dangerouslySetInnerHTML={{ __html: ad.script_code }} />
           ) : (
-            <img
+            <img loading="lazy" decoding="async"
               src={ad.image_url}
               alt={ad.title}
               className="w-full max-h-40 object-cover"
@@ -187,7 +187,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({ slot, className = '' }) => {
           <div className="max-w-full overflow-hidden" dangerouslySetInnerHTML={{ __html: ad.script_code }} />
         ) : (
           <div className="h-28 sm:h-36 w-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-            <img
+            <img loading="lazy" decoding="async"
               src={ad.image_url}
               alt={ad.title}
               className="w-full h-full object-cover"
