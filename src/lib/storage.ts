@@ -5,7 +5,8 @@ export type UploadBucket = 'news-images' | 'branding' | 'notices';
 const MAX_DIMENSION = 1600;
 
 /**
- * Shrinks big photos in the browser (max 1600px, WebP) before upload.
+ * Shrinks big photos in the browser (max 1600px, JPEG) before upload.
+ * JPEG (not WebP) because Facebook / WhatsApp / Viber share previews do not always show WebP.
  * Logos/branding (transparent PNG, SVG, ICO) are uploaded untouched.
  */
 async function prepare(file: File, bucket: UploadBucket): Promise<{ blob: Blob; ext: string }> {
@@ -23,10 +24,12 @@ async function prepare(file: File, bucket: UploadBucket): Promise<{ blob: Blob; 
     canvas.height = Math.round(bitmap.height * scale);
     const ctx = canvas.getContext('2d');
     if (!ctx) return { blob: file, ext: fallbackExt };
+    ctx.fillStyle = '#ffffff'; // transparent PNG areas would turn black in a JPEG
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
 
-    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.85));
-    if (blob && blob.size < file.size) return { blob, ext: 'webp' };
+    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+    if (blob && blob.size < file.size) return { blob, ext: 'jpg' };
   } catch {
     /* fall through to the original file */
   }

@@ -422,6 +422,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const inflightRef = useRef(0); // DB writes in progress
   const adTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const adImageDirtyRef = useRef<Record<string, boolean>>({}); // ad image changed since last save
   const syncingRef = useRef(false);
   const pendingSyncRef = useRef(false);
 
@@ -800,19 +801,34 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   // Site Settings (synced to Supabase public.site_settings)
+  const SETTINGS_ROW_ID = '00000000-0000-0000-0000-000000000001';
   const updateSiteSettings = (newSettings: Partial<SiteSettings>) => {
-    const updated = { ...settingsRef.current, ...newSettings };
+    // send ONLY what changed: the whole row also holds the logo / favicon / watermark and
+    // re-sending them on every save made the request huge and the database timed out
+    const prev = settingsRef.current;
+    const changed: Record<string, any> = {};
+    (Object.keys(newSettings) as (keyof SiteSettings)[]).forEach((k) => {
+      if (JSON.stringify(newSettings[k]) !== JSON.stringify(prev[k])) changed[k as string] = newSettings[k];
+    });
+    if (Object.keys(changed).length === 0) return;
+
+    const updated = { ...prev, ...newSettings };
     settingsRef.current = updated;
     setSiteSettings(updated);
     persist(SETTINGS_KEY, updated);
 
-    dbWrite('Site settings', () =>
-      supabase.from('site_settings').upsert({
-        ...settingsRow(updated),
-        id: '00000000-0000-0000-0000-000000000001',
-        updated_at: new Date().toISOString()
-      })
-    );
+    dbWrite('Site settings', async () => {
+      const now = new Date().toISOString();
+      const { data, error } = await supabase
+        .from('site_settings')
+        .update({ ...settingsRow(changed as SiteSettings), updated_at: now })
+        .eq('id', SETTINGS_ROW_ID)
+        .select('id');
+      if (error) return { error };
+      if (data && data.length > 0) return {};
+      // first ever save: the row does not exist yet
+      return supabase.from('site_settings').insert({ ...settingsRow(updated), id: SETTINGS_ROW_ID, updated_at: now });
+    });
   };
 
   // Categories (synced to Supabase public.categories)
@@ -893,10 +909,19 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     audio_url: p.audio_url || null
   });
 
-  const savePost = (label: string, p: Post, oldSlug?: string, isNew = false) =>
+  const savePost = (label: string, p: Post, oldSlug?: string, isNew = false, previous?: Post) =>
     dbWrite(label, async () => {
-      const row = await postRow(p);
+      const row: Record<string, any> = await postRow(p);
       if (isNew) return supabase.from('posts').insert(row);
+      if (previous) {
+        // an unchanged photo (old posts may still hold a multi-MB base64 photo) is not re-sent
+        const partial = { ...row };
+        if (previous.featured_image === p.featured_image) delete partial.featured_image;
+        const { data, error } = await supabase.from('posts').update(partial).eq('slug', previous.slug).select('id');
+        if (error) return { error };
+        if (data && data.length > 0) return {};
+        return supabase.from('posts').insert(row); // the row was deleted elsewhere: re-create it
+      }
       return oldSlug && oldSlug !== p.slug
         ? supabase.from('posts').update(row).eq('slug', oldSlug) // slug renamed: don't create a duplicate
         : supabase.from('posts').upsert(row, { onConflict: 'slug' });
@@ -970,7 +995,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (isPostLive(modified) && (willPublish || becameBreaking)) {
       announce(modified);
     }
-    savePost('Post update', modified, previous.slug);
+    savePost('Post update', modified, previous.slug, false, previous);
   };
 
   const deletePost = (id: string) => {
@@ -1050,8 +1075,10 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const writeAd = (adId: string) => {
     const target = adsRef.current.find((a) => a.id === adId);
     if (!target) return;
+    const imageChanged = !!adImageDirtyRef.current[adId];
     dbWrite('Advertisement', async () => {
-      const row = adRow(target);
+      const row: Record<string, any> = adRow(target);
+      if (!imageChanged) delete row.image_url; // do not re-send a big unchanged image
       if (isUuid(target.id)) {
         return supabase.from('advertisements').update(row).eq('id', target.id);
       }
@@ -1065,11 +1092,14 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (existing?.id) return supabase.from('advertisements').update(row).eq('id', existing.id);
       return supabase
         .from('advertisements')
-        .insert({ ...row, views_count: target.views_count || 0, clicks_count: target.clicks_count || 0 });
+        .insert({ ...adRow(target), views_count: target.views_count || 0, clicks_count: target.clicks_count || 0 });
+    }).then((ok) => {
+      if (ok) delete adImageDirtyRef.current[adId];
     });
   };
 
   const updateAd = (id: string, adFields: Partial<Advertisement>) => {
+    if (adFields.image_url !== undefined) adImageDirtyRef.current[id] = true;
     const updated = adsRef.current.map((ad) => (ad.id === id ? { ...ad, ...adFields } : ad));
     adsRef.current = updated;
     setAds(updated);

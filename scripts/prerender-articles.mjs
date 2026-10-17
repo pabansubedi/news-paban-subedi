@@ -14,6 +14,7 @@ import path from 'node:path';
 const SITE = 'https://news.pabansubedi.com.np';
 const SITE_NAME = 'News Paban Subedi';
 const DIST = path.resolve('dist');
+const DEFAULT_IMAGE = `${SITE}/og-default.jpg`; // used when a news has no usable photo
 
 const cfgFile = fs.readFileSync(path.resolve('src/lib/supabase.ts'), 'utf8');
 const SUPABASE_URL = process.env.SUPABASE_URL || /url:\s*'([^']+)'/.exec(cfgFile)?.[1];
@@ -46,12 +47,15 @@ function pageHtml(template, { title, desc, url, image, type }) {
     .replace(/(<meta property="og:url" content=")[^"]*(")/, `$1${esc(url)}$2`)
     .replace(/(<meta name="twitter:title" content=")[^"]*(")/, `$1${esc(title)}$2`)
     .replace(/(<meta name="twitter:description" content=")[^"]*(")/, `$1${esc(desc)}$2`);
-  const extra =
-    `<link rel="canonical" href="${esc(url)}" />\n` +
-    (image
-      ? `    <meta property="og:image" content="${esc(image)}" />\n    <meta name="twitter:image" content="${esc(image)}" />\n`
-      : '');
-  return html.replace('</head>', `    ${extra}  </head>`);
+  const img = image || DEFAULT_IMAGE;
+  html = html
+    .replace(/(<meta property="og:image" content=")[^"]*(")/, `$1${esc(img)}$2`)
+    .replace(/(<meta name="twitter:image" content=")[^"]*(")/, `$1${esc(img)}$2`);
+  // the 1200x630 size is only true for our own default image
+  if (img !== DEFAULT_IMAGE) {
+    html = html.replace(/\s*<meta property="og:image:(width|height)"[^>]*>/g, '');
+  }
+  return html.replace('</head>', `    <link rel="canonical" href="${esc(url)}" />\n  </head>`);
 }
 
 function write(rel, content) {
