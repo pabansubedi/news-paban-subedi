@@ -659,6 +659,7 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!error && data) setUsers(data.map((r: any) => mapProfile(r)));
   };
 
+  const profileIssueRef = useRef<'none' | 'missing' | 'inactive' | 'error'>('none');
   const loadProfile = async (authUser: { id: string; email?: string | null } | null): Promise<UserProfile | null> => {
     if (!authUser) {
       setGuest();
@@ -666,9 +667,11 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
     const { data, error } = await supabase.from('users_profile').select('*').eq('user_id', authUser.id).maybeSingle();
     if (error || !data || !data.is_active) {
+      profileIssueRef.current = error ? 'error' : !data ? 'missing' : 'inactive';
       setGuest();
       return null;
     }
+    profileIssueRef.current = 'none';
     const profile = mapProfile(data, authUser.email || '');
     setCurrentRole(profile.role);
     setCurrentUser(profile);
@@ -719,7 +722,18 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const profile = await loadProfile(data.user);
     if (!profile) {
       await supabase.auth.signOut();
-      return { success: false, error: 'यो खाता सक्रिय छैन वा स्टाफ अनुमति छैन। सुपर एडमिनसँग सम्पर्क गर्नुहोस्।' };
+      const why = profileIssueRef.current;
+      return {
+        success: false,
+        error:
+          why === 'missing'
+            ? 'यो इमेलको स्टाफ प्रोफाइल बनेको छैन। सुपर एडमिनले कर्मचारी सूचीबाट थप्नुपर्छ।'
+            : why === 'inactive'
+              ? 'यो खाता निष्क्रिय छ। सुपर एडमिनले कर्मचारी सूचीमा "सक्रिय" गरिदिनुपर्छ।'
+              : why === 'error'
+                ? 'स्टाफ प्रोफाइल पढ्न सकिएन (अनुमति समस्या)। सुपर एडमिनलाई जानकारी दिनुहोस्।'
+                : 'यो खाता सक्रिय छैन वा स्टाफ अनुमति छैन। सुपर एडमिनसँग सम्पर्क गर्नुहोस्।'
+      };
     }
     return { success: true };
   };
@@ -752,8 +766,16 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { ok: false, error: 'यो इमेल पहिले नै दर्ता भइसकेको छ।' };
     }
     // the database trigger made an INACTIVE reporter profile: set the real role and activate it
-    const ok = await dbWrite('Staff add', () =>
-      supabase
+    // (database function first; plain update as fallback if the SQL was not installed yet)
+    const viaFn = await supabase.rpc('admin_set_staff', {
+      p_user_id: created.id,
+      p_role: input.role,
+      p_name: input.full_name,
+      p_phone: input.phone || '',
+      p_bio: input.bio || ''
+    });
+    if (viaFn.error) {
+      await supabase
         .from('users_profile')
         .update({
           role: input.role,
@@ -763,10 +785,22 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
           avatar: input.avatar || null,
           is_active: true
         })
-        .eq('user_id', created.id)
-    );
+        .eq('user_id', created.id);
+    }
+    // never report success without checking: the old update could change 0 rows silently
+    const { data: check } = await supabase
+      .from('users_profile')
+      .select('is_active, role')
+      .eq('user_id', created.id)
+      .maybeSingle();
     await refreshUsers();
-    if (!ok) return { ok: false, error: 'खाता बन्यो तर भूमिका सेट हुन सकेन। सूचीमा गएर भूमिका फेरि छान्नुहोस्।' };
+    if (!check || !check.is_active || check.role !== input.role) {
+      return {
+        ok: false,
+        error:
+          'खाता बन्यो तर सक्रिय हुन सकेन। Supabase SQL Editor मा staff-fix.sql चलाउनुहोस्, वा कर्मचारी सूचीमा गएर "सक्रिय" थिच्नुहोस्।'
+      };
+    }
     return { ok: true, needsConfirm: !data.session };
   };
 
