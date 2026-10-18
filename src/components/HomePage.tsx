@@ -19,9 +19,10 @@ import {
 interface HomePageProps {
   categoryFilter?: string;
   searchQuery?: string;
+  tagFilter?: string;
 }
 
-export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery }) => {
+export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery, tagFilter }) => {
   const { posts, categories, navigateTo, siteSettings, postsLoaded } = useNewsApp();
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
 
@@ -35,6 +36,7 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
       // unknown category (or not loaded yet) must show nothing, never ALL posts
       if (!cat || post.category_id !== cat.id) return false;
     }
+    if (tagFilter && !(post.tags || []).some((t) => t.toLowerCase() === tagFilter.toLowerCase())) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const matchTitle = post.title.toLowerCase().includes(q);
@@ -94,16 +96,18 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
       {/* Category or Search Result Header */}
-      {(categoryFilter || searchQuery) && (
+      {(categoryFilter || searchQuery || tagFilter) && (
         <div className="mb-6 p-4 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 flex items-center justify-between">
           <div>
             <span className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wider">
-              {categoryFilter ? 'विधा अनुसार नतिजा' : 'खोज नतिजा'}
+              {categoryFilter ? 'विधा अनुसार नतिजा' : tagFilter ? 'ट्याग अनुसार नतिजा' : 'खोज नतिजा'}
             </span>
             <h2 className="text-xl font-bold text-slate-900 dark:text-white mt-0.5">
               {categoryFilter
                 ? categories.find((c) => c.slug === categoryFilter)?.name || categoryFilter
-                : `"${searchQuery}" को नतिजा (${toNepaliDigits(filteredPosts.length)})`}
+                : tagFilter
+                  ? `#${tagFilter} (${toNepaliDigits(filteredPosts.length)})`
+                  : `"${searchQuery}" को नतिजा (${toNepaliDigits(filteredPosts.length)})`}
             </h2>
           </div>
           <button

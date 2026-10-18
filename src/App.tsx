@@ -132,6 +132,8 @@ const MainLayout: React.FC = () => {
       }
     } else if (currentRoute.page === 'category' && currentRoute.param) {
       document.title = `${currentRoute.param} - ${siteSettings.site_title}`;
+    } else if (currentRoute.page === 'tag' && currentRoute.param) {
+      document.title = `#${currentRoute.param} - ${siteSettings.site_title}`;
     } else if (currentRoute.page === 'admin') {
       document.title = `CMS Admin Panel - ${siteSettings.site_title}`;
     } else if (currentRoute.page === 'docs') {
@@ -226,6 +228,10 @@ const MainLayout: React.FC = () => {
 
         {currentRoute.page === 'category' && (
           <HomePage categoryFilter={currentRoute.param} />
+        )}
+
+        {currentRoute.page === 'tag' && currentRoute.param && (
+          <HomePage tagFilter={currentRoute.param} />
         )}
 
         {currentRoute.page === 'article' && currentRoute.param && (

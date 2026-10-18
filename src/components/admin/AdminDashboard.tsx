@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNewsApp } from '../../lib/store';
 import { Post, PostStatus, AdPlacementSlot, Category, UserProfile } from '../../types';
 import { toNepaliDigits } from '../../lib/nepaliDate';
@@ -72,6 +72,8 @@ export const AdminDashboard: React.FC = () => {
     comments,
     updateCommentApproval,
     deleteComment,
+    totalVisitors,
+    onlineVisitors,
     addPost,
     updatePost,
     deletePost,
@@ -87,13 +89,25 @@ export const AdminDashboard: React.FC = () => {
     navigateTo
   } = useNewsApp();
 
-  type AdminTab = 'posts' | 'new_post' | 'ads' | 'categories' | 'comments' | 'staff' | 'settings' | 'notifications' | 'sql_schema' | 'nextjs_code';
-  const [activeTab, setActiveTab] = useState<AdminTab>('posts');
+  type AdminTab = 'overview' | 'posts' | 'new_post' | 'ads' | 'categories' | 'comments' | 'staff' | 'settings' | 'notifications' | 'sql_schema' | 'nextjs_code';
+  const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [adSizeNotes, setAdSizeNotes] = useState<Record<string, string>>({});
   const [postPublishAt, setPostPublishAt] = useState(''); // datetime-local value ('' = publish now)
   const [commentFilter, setCommentFilter] = useState<'all' | 'pending' | 'approved'>('all');
   const pendingComments = comments.filter((c) => !c.is_approved).length;
+  const publishedCount = posts.filter((p) => p.status === 'published').length;
+  const pendingCount = posts.filter((p) => p.status === 'pending').length;
+  const draftCount = posts.filter((p) => p.status === 'draft').length;
+  const totalViews = posts.reduce((sum, p) => sum + (p.views || 0), 0);
+  const topPosts = posts
+    .filter((p) => p.status === 'published')
+    .slice()
+    .sort((a, b) => (b.views || 0) - (a.views || 0))
+    .slice(0, 5);
+  const pendingList = posts.filter((p) => p.status === 'pending').slice(0, 5);
+  const contentRef = useRef<HTMLTextAreaElement>(null);
+  const bodyImageRef = useRef<HTMLInputElement>(null);
   // ISO -> value for <input type="datetime-local"> in the editor's own time zone
   const toLocalInput = (iso: string) => {
     const d = new Date(iso);
@@ -264,6 +278,44 @@ export const AdminDashboard: React.FC = () => {
       setUploadingImage(false);
       input.value = '';
     }
+  };
+
+  // ---- article editor: insert a photo / video / heading / quote at the cursor ----
+  const insertAtCursor = (snippet: string) => {
+    const el = contentRef.current;
+    const start = el?.selectionStart ?? postContent.length;
+    const end = el?.selectionEnd ?? start;
+    const before = postContent.slice(0, start);
+    const after = postContent.slice(end);
+    const lead = before && !before.endsWith('\n\n') ? (before.endsWith('\n') ? '\n' : '\n\n') : '';
+    const tail = after && !after.startsWith('\n\n') ? (after.startsWith('\n') ? '\n' : '\n\n') : '';
+    setPostContent(before + lead + snippet + tail + after);
+  };
+
+  const handleBodyImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const file = input.files?.[0];
+    if (!file) return;
+    setUploadingImage(true);
+    try {
+      const url = await uploadImage(file, 'news-images');
+      insertAtCursor(`![फोटो विवरण यहाँ लेख्नुहोस्](${url})`);
+    } catch (err: any) {
+      window.dispatchEvent(new CustomEvent('news-sync-error', { detail: `तस्बिर अपलोड भएन: ${err?.message || err}` }));
+    } finally {
+      setUploadingImage(false);
+      input.value = '';
+    }
+  };
+
+  const addYouTube = () => {
+    const link = window.prompt('YouTube भिडियोको लिङ्क (https://youtu.be/... वा youtube.com/watch?v=...)');
+    if (!link) return;
+    if (!/(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[\w-]{11}/.test(link)) {
+      alert('यो YouTube लिङ्क जस्तो देखिएन।');
+      return;
+    }
+    insertAtCursor(link.trim());
   };
 
   const handleAddStaff = async (e: React.FormEvent) => {
@@ -524,6 +576,17 @@ export const AdminDashboard: React.FC = () => {
       {/* ADMIN TABS NAVIGATION */}
       <div className="flex border-b border-slate-200 dark:border-slate-800 mb-6 overflow-x-auto scrollbar-none gap-1">
         <button
+          onClick={() => setActiveTab('overview')}
+          className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
+            activeTab === 'overview'
+              ? 'border-red-600 text-red-600 dark:text-red-400'
+              : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>सारांश</span>
+        </button>
+        <button
           onClick={() => setActiveTab('posts')}
           className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap cursor-pointer ${
             activeTab === 'posts'
@@ -657,6 +720,77 @@ export const AdminDashboard: React.FC = () => {
           <span>Next.js App Router Architecture</span>
         </button>
       </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* OVERVIEW */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'overview' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {(
+              [
+                ['जम्मा समाचार', posts.length, 'text-slate-900 dark:text-white'],
+                ['प्रकाशित', publishedCount, 'text-emerald-600'],
+                ['स्वीकृति बाँकी', pendingCount, 'text-amber-600'],
+                ['ड्राफ्ट', draftCount, 'text-slate-500 dark:text-slate-400'],
+                ['कुल पढाइ (Views)', totalViews, 'text-red-600'],
+                ['कुल पाठक', totalVisitors, 'text-blue-600'],
+                ['अहिले अनलाइन', onlineVisitors, 'text-violet-600'],
+                ['स्वीकृति बाँकी टिप्पणी', pendingComments, 'text-rose-600']
+              ] as const
+            ).map(([label, value, color]) => (
+              <div
+                key={label}
+                className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs"
+              >
+                <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">{label}</div>
+                <div className={`text-2xl font-black mt-1 ${color}`}>{toNepaliDigits(Number(value))}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+              <h4 className="font-bold text-sm text-slate-900 dark:text-white mb-3">सबैभन्दा धेरै पढिएका समाचार</h4>
+              {topPosts.length === 0 && <p className="text-xs text-slate-400">अहिलेसम्म प्रकाशित समाचार छैन।</p>}
+              <ol className="space-y-2">
+                {topPosts.map((p, i) => (
+                  <li key={p.id} className="flex items-start gap-3 text-sm">
+                    <span className="w-5 text-slate-400 font-bold">{toNepaliDigits(i + 1)}</span>
+                    <button
+                      type="button"
+                      onClick={() => navigateTo('article', p.slug)}
+                      className="flex-1 text-left text-slate-800 dark:text-slate-200 hover:text-red-600 break-words cursor-pointer"
+                    >
+                      {p.title}
+                    </button>
+                    <span className="text-xs font-bold text-red-600 whitespace-nowrap">{toNepaliDigits(p.views || 0)}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
+              <h4 className="font-bold text-sm text-slate-900 dark:text-white mb-3">स्वीकृतिको पर्खाइमा</h4>
+              {pendingList.length === 0 && <p className="text-xs text-slate-400">पर्खाइमा कुनै समाचार छैन।</p>}
+              <ul className="space-y-2">
+                {pendingList.map((p) => (
+                  <li key={p.id} className="flex items-start gap-3 text-sm">
+                    <span className="flex-1 text-slate-800 dark:text-slate-200 break-words">{p.title}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleEditClick(p)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 cursor-pointer whitespace-nowrap"
+                    >
+                      हेर्नुहोस्
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ------------------------------------------------------------- */}
       {/* TAB 1: POSTS & EDITORIAL APPROVAL WORKFLOW */}
@@ -1003,7 +1137,40 @@ export const AdminDashboard: React.FC = () => {
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase mb-1">
                 समाचारको पूर्ण विवरण (Article Content) *
               </label>
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={() => bodyImageRef.current?.click()}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+                >
+                  🖼️ तस्बिर थप्नुहोस्
+                </button>
+                <button
+                  type="button"
+                  onClick={addYouTube}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+                >
+                  ▶️ YouTube
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertAtCursor('## उपशीर्षक')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+                >
+                  H उपशीर्षक
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertAtCursor('> उद्धरण यहाँ लेख्नुहोस्')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+                >
+                  ❝ उद्धरण
+                </button>
+                <input ref={bodyImageRef} type="file" accept="image/*" onChange={handleBodyImage} className="hidden" />
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">अनुच्छेदहरूबीच एउटा खाली लाइन राख्नुहोस्।</span>
+              </div>
               <textarea
+                ref={contentRef}
                 value={postContent}
                 onChange={(e) => setPostContent(e.target.value)}
                 rows={10}

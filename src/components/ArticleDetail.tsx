@@ -28,6 +28,12 @@ interface ArticleDetailProps {
   slug: string;
 }
 
+// Article body syntax (one block per paragraph, blocks are separated by an empty line):
+//   ![photo caption](https://...)   inline photo        https://youtu.be/xxxxxxxxxxx   YouTube video
+//   ## Sub heading                  heading             > quoted text                  quote
+const YT_RE = /^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([\w-]{11})(?:[&?#]\S*)?$/;
+const IMG_RE = /^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)$/;
+
 export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
   const {
     posts,
@@ -107,6 +113,33 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
     };
   }, [post?.slug, post?.title]);
 
+  // Reader tools: font size (remembered) + reading progress bar
+  const [fontScale, setFontScale] = useState<number>(() => {
+    try {
+      const v = parseFloat(localStorage.getItem('np_font_scale') || '1');
+      return v >= 0.85 && v <= 1.5 ? v : 1;
+    } catch {
+      return 1;
+    }
+  });
+  const changeFont = (delta: number) => {
+    const next = Math.min(1.5, Math.max(0.85, Math.round((fontScale + delta) * 100) / 100));
+    setFontScale(next);
+    try {
+      localStorage.setItem('np_font_scale', String(next));
+    } catch {}
+  };
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    const onScroll = () => {
+      const h = document.documentElement.scrollHeight - window.innerHeight;
+      setProgress(h > 0 ? Math.min(100, (window.scrollY / h) * 100) : 0);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [post?.id]);
+
   // Clean up audio on unmount
   useEffect(() => {
     return () => {
@@ -165,7 +198,12 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
       setIsPlayingAudio(false);
     } else {
       window.speechSynthesis.cancel();
-      const textToRead = `${post.title}. ${post.content}`;
+      // photos / video links / markup must not be read aloud
+      const spoken = post.content
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+        .replace(/^(?:https?:\/\/)\S+$/gm, '')
+        .replace(/^(##\s+|>\s?)/gm, '');
+      const textToRead = `${post.title}. ${spoken}`;
       const utterance = new SpeechSynthesisUtterance(textToRead);
       utterance.rate = speechRate;
       utterance.lang = 'ne-NP';
@@ -217,8 +255,53 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
   // Splitting content into paragraphs for in-article ad injection
   const paragraphs = post.content.split('\n\n').filter((p) => p.trim());
 
+  const renderBlock = (raw: string) => {
+    const block = raw.trim();
+    const img = IMG_RE.exec(block);
+    if (img) {
+      return (
+        <figure className="my-2">
+          <img loading="lazy" decoding="async" src={img[2]} alt={img[1]} className="w-full rounded-xl" />
+          {img[1] && (
+            <figcaption className="mt-2 text-sm text-center text-slate-500 dark:text-slate-400">{img[1]}</figcaption>
+          )}
+        </figure>
+      );
+    }
+    const yt = YT_RE.exec(block);
+    if (yt) {
+      return (
+        <div className="aspect-video w-full rounded-xl overflow-hidden bg-black">
+          <iframe
+            src={`https://www.youtube-nocookie.com/embed/${yt[1]}`}
+            title="YouTube video"
+            loading="lazy"
+            allowFullScreen
+            className="w-full h-full"
+          />
+        </div>
+      );
+    }
+    if (block.startsWith('## ')) {
+      return <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white break-words">{block.slice(3)}</h2>;
+    }
+    if (block.startsWith('>')) {
+      return (
+        <blockquote className="border-l-4 border-red-600 pl-4 italic text-slate-700 dark:text-slate-300 break-words">
+          {block.replace(/^>\s?/gm, '')}
+        </blockquote>
+      );
+    }
+    return <p className="leading-relaxed break-words">{raw}</p>;
+  };
+
   return (
     <article className="max-w-4xl mx-auto px-4 py-8 article-print-container">
+      <div
+        className="fixed top-0 left-0 h-1 bg-red-600 z-[60] no-print"
+        style={{ width: `${progress}%` }}
+        aria-hidden="true"
+      />
       {/* Back button & Category badge */}
       <div className="flex items-center justify-between gap-4 mb-4 no-print">
         <button
@@ -441,6 +524,26 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
           </button>
         </div>
 
+        {/* Reader font size */}
+        <div className="flex items-center gap-1" aria-label="अक्षरको आकार">
+          <button
+            type="button"
+            onClick={() => changeFont(-0.1)}
+            className="px-2.5 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-xs hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+            title="अक्षर सानो"
+          >
+            A−
+          </button>
+          <button
+            type="button"
+            onClick={() => changeFont(0.1)}
+            className="px-2.5 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-sm hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer"
+            title="अक्षर ठूलो"
+          >
+            A+
+          </button>
+        </div>
+
         {/* Print Article & PDF Button */}
         <button
           onClick={handlePrint}
@@ -452,10 +555,13 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
       </div>
 
       {/* ARTICLE BODY PARAGRAPHS WITH IN-ARTICLE AD INJECTION */}
-      <div className="prose prose-lg dark:prose-invert max-w-none space-y-6 text-slate-800 dark:text-slate-200 text-lg leading-relaxed font-normal">
+      <div
+        style={{ fontSize: `${1.125 * fontScale}rem` }}
+        className="prose prose-lg dark:prose-invert max-w-none space-y-6 text-slate-800 dark:text-slate-200 text-lg leading-relaxed font-normal"
+      >
         {paragraphs.map((para, index) => (
           <React.Fragment key={index}>
-            <p className="leading-relaxed break-words">{para}</p>
+            {renderBlock(para)}
             {/* Ad Location 4: Inside Article Detail Page (Between paragraphs, after 2nd paragraph) */}
             {index === 1 && (
               <div className="no-print">
@@ -471,12 +577,14 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
         <div className="flex flex-wrap items-center gap-2 mt-8 pt-6 border-t border-slate-200 dark:border-slate-800 no-print">
           <span className="text-xs font-bold text-slate-500">ट्यागहरू:</span>
           {post.tags.map((tag, idx) => (
-            <span
+            <button
               key={idx}
-              className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-3 py-1 rounded-md border border-slate-200 dark:border-slate-700"
+              type="button"
+              onClick={() => navigateTo('tag', tag)}
+              className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-3 py-1 rounded-md border border-slate-200 dark:border-slate-700 hover:border-red-400 hover:text-red-600 cursor-pointer"
             >
               #{tag}
-            </span>
+            </button>
           ))}
         </div>
       )}

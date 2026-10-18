@@ -79,8 +79,8 @@ interface NewsAppContextType {
   // Theme & Navigation
   isDarkMode: boolean;
   toggleDarkMode: () => void;
-  currentRoute: { page: 'home' | 'article' | 'category' | 'admin' | 'docs'; param?: string };
-  navigateTo: (page: 'home' | 'article' | 'category' | 'admin' | 'docs', param?: string) => void;
+  currentRoute: { page: 'home' | 'article' | 'category' | 'tag' | 'admin' | 'docs'; param?: string };
+  navigateTo: (page: 'home' | 'article' | 'category' | 'tag' | 'admin' | 'docs', param?: string) => void;
 }
 
 const NewsAppContext = createContext<NewsAppContextType | undefined>(undefined);
@@ -210,7 +210,7 @@ const GUEST_USER: UserProfile = {
 // GitHub Pages serves 404.html (= index.html) for deep links, and the build
 // pre-renders every published article (see scripts/prerender-articles.mjs).
 // ---------------------------------------------------------------------------
-type Page = 'home' | 'article' | 'category' | 'admin' | 'docs';
+type Page = 'home' | 'article' | 'category' | 'tag' | 'admin' | 'docs';
 type Route = { page: Page; param?: string };
 
 const pathFor = (page: Page, param?: string): string => {
@@ -219,6 +219,8 @@ const pathFor = (page: Page, param?: string): string => {
       return param ? `/news/${encodeURIComponent(param)}` : '/';
     case 'category':
       return param ? `/category/${encodeURIComponent(param)}` : '/';
+    case 'tag':
+      return param ? `/tag/${encodeURIComponent(param)}` : '/';
     case 'admin':
       return '/admin';
     case 'docs':
@@ -234,6 +236,7 @@ const parseLocation = (): Route => {
     const parts = pathname.split('/').filter(Boolean).map((x) => decodeURIComponent(x));
     if (parts[0] === 'news' && parts[1]) return { page: 'article', param: parts[1] };
     if (parts[0] === 'category' && parts[1]) return { page: 'category', param: parts[1] };
+    if (parts[0] === 'tag' && parts[1]) return { page: 'tag', param: parts[1] };
     if (parts[0] === 'admin') return { page: 'admin' };
     if (parts[0] === 'docs') return { page: 'docs' };
     const q = new URLSearchParams(search).get('q');
