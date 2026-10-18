@@ -1107,6 +1107,11 @@ export const AdminDashboard: React.FC = () => {
                   <p className="text-[11px] text-slate-400">
                     JPG, PNG वा WebP फाइल चयन गर्नुहोस्। PC बाट सिधै अपलोड हुन्छ।
                   </p>
+                  {(/\.webp(\?|$)/i.test(postImage) || /images\.unsplash\.com/.test(postImage)) && (
+                    <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">
+                      ⚠️ यो तस्बिर Facebook / WhatsApp शेयरमा नदेखिन सक्छ (WebP वा नमूना तस्बिर)। आफ्नै फोटो अपलोड गर्नुहोस् (JPEG बन्छ)।
+                    </p>
+                  )}
                   <input
                     type="text"
                     value={postImageCaption}

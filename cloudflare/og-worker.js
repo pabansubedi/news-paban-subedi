@@ -11,6 +11,25 @@ const BOTS = /facebookexternalhit|Facebot|WhatsApp|Twitterbot|LinkedInBot|Telegr
 const SITE = 'https://news.pabansubedi.com.np';
 const DEFAULT_IMAGE = `${SITE}/og-default.jpg`;
 
+// Facebook / WhatsApp show NO photo at all when the og:image is WebP, over 8 MB, blocked
+// (hotlink protection) or gone. So a photo is only used when it really is a reachable JPEG / PNG / GIF;
+// otherwise the default share image is used and a preview is never empty.
+async function usableImage(url) {
+  try {
+    const r = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(3000),
+      headers: { 'user-agent': 'facebookexternalhit/1.1' }
+    });
+    const type = (r.headers.get('content-type') || '').toLowerCase();
+    const size = Number(r.headers.get('content-length') || 0);
+    return r.ok && /^image\/(jpe?g|png|gif)/.test(type) && size < 8 * 1024 * 1024;
+  } catch {
+    return false;
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -28,7 +47,8 @@ export default {
 
       const title = `${post.title} | News Paban Subedi`;
       const desc = String(post.excerpt || post.summary || post.title).replace(/\s+/g, ' ').trim().slice(0, 160);
-      const image = /^https?:\/\//i.test(post.featured_image || '') ? post.featured_image : DEFAULT_IMAGE;
+      const candidate = /^https?:\/\//i.test(post.featured_image || '') ? post.featured_image : '';
+      const image = candidate && (await usableImage(candidate)) ? candidate : DEFAULT_IMAGE;
       const pageUrl = `${SITE}/news/${encodeURIComponent(slug)}`;
 
       const shell = await fetch(`${SITE}/`, { headers: { 'user-agent': 'og-worker' } });

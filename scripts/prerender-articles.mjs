@@ -30,6 +30,39 @@ const esc = (v) =>
 const safeSegment = (s) => !!s && !/[\/\\?#]/.test(s) && !s.includes('..');
 const mimeOf = (u) => (/\.png(\?|$)/i.test(u) ? 'image/png' : /\.webp(\?|$)/i.test(u) ? 'image/webp' : /\.gif(\?|$)/i.test(u) ? 'image/gif' : 'image/jpeg');
 
+// Facebook / WhatsApp show NO photo at all when the og:image is WebP, over 8 MB, blocked
+// (hotlink protection) or gone. So a photo is only used when it really is a reachable JPEG / PNG / GIF;
+// otherwise the default share image is used and a preview is never empty.
+async function usableImage(url) {
+  try {
+    const r = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(6000),
+      headers: { 'user-agent': 'facebookexternalhit/1.1' }
+    });
+    const type = (r.headers.get('content-type') || '').toLowerCase();
+    const size = Number(r.headers.get('content-length') || 0);
+    return r.ok && /^image\/(jpe?g|png|gif)/.test(type) && size < 8 * 1024 * 1024;
+  } catch {
+    return false;
+  }
+}
+
+async function checkAll(urls) {
+  const ok = new Map();
+  const queue = [...new Set(urls)];
+  await Promise.all(
+    Array.from({ length: 8 }, async () => {
+      while (queue.length) {
+        const u = queue.pop();
+        ok.set(u, await usableImage(u));
+      }
+    })
+  );
+  return ok;
+}
+
 async function get(table, query) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, { headers: { apikey: SUPABASE_KEY } });
   if (!res.ok) throw new Error(`${table}: Supabase answered ${res.status}`);
@@ -87,10 +120,15 @@ async function main() {
     (p) => (!p.published_at || new Date(p.published_at).getTime() <= now) && safeSegment(p.slug)
   );
 
+  // which photos can really be used as share image
+  const photoOk = await checkAll(live.map((p) => p.featured_image).filter((u) => /^https?:\/\//i.test(u || '')));
+  const badPhotos = [...photoOk.values()].filter((v) => !v).length;
+  if (badPhotos) console.warn(`[prerender] ${badPhotos} photo(s) are not usable as share image (not JPEG/PNG, blocked or missing): default image used.`);
+
   // ---- article pages
   for (const p of live) {
     const desc = String(p.excerpt || p.summary || p.title).replace(/\s+/g, ' ').trim().slice(0, 160);
-    const image = /^https?:\/\//i.test(p.featured_image || '') ? p.featured_image : '';
+    const image = photoOk.get(p.featured_image) ? p.featured_image : '';
     write(
       path.join('news', p.slug, 'index.html'),
       pageHtml(template, {
