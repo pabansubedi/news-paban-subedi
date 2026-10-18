@@ -256,10 +256,40 @@ const MainLayout: React.FC = () => {
   );
 };
 
+// If any screen throws while rendering, show a friendly page instead of a blank white screen
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error: unknown) {
+    console.error('Page crashed:', error);
+  }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 text-center">
+        <div>
+          <h1 className="text-xl font-bold mb-2 text-slate-900 dark:text-white">पेज लोड हुन सकेन</h1>
+          <p className="text-sm text-slate-500 mb-4">केही गडबड भयो। कृपया पेज रिफ्रेस गर्नुहोस्।</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold cursor-pointer"
+          >
+            रिफ्रेस गर्नुहोस्
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
 export default function App() {
   return (
-    <NewsAppProvider>
-      <MainLayout />
-    </NewsAppProvider>
+    <ErrorBoundary>
+      <NewsAppProvider>
+        <MainLayout />
+      </NewsAppProvider>
+    </ErrorBoundary>
   );
 }

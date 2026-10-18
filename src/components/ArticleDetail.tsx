@@ -54,6 +54,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
   const [copied, setCopied] = useState(false);
   const [commentName, setCommentName] = useState('');
   const [commentText, setCommentText] = useState('');
+  const [commentTrap, setCommentTrap] = useState(''); // hidden field: only bots fill it
   const [commentSuccess, setCommentSuccess] = useState(false);
 
   // Audio / TTS state
@@ -245,7 +246,16 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
   const handleCommentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!commentName.trim() || !commentText.trim()) return;
-    addComment(post.id, commentName.trim(), commentText.trim());
+    if (commentTrap) return; // a bot filled the hidden field
+    try {
+      const last = Number(localStorage.getItem('np_last_comment') || 0);
+      if (Date.now() - last < 30000) {
+        alert('कृपया ३० सेकेन्डपछि फेरि प्रयास गर्नुहोस्।');
+        return;
+      }
+      localStorage.setItem('np_last_comment', String(Date.now()));
+    } catch {}
+    addComment(post.id, commentName.trim().slice(0, 60), commentText.trim().slice(0, 1000));
     setCommentName('');
     setCommentText('');
     setCommentSuccess(true);
@@ -609,6 +619,15 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
           <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
             तपाईंको विचार व्यक्त गर्नुहोस् (Add Comment)
           </h4>
+          <input
+            type="text"
+            tabIndex={-1}
+            autoComplete="off"
+            aria-hidden="true"
+            value={commentTrap}
+            onChange={(e) => setCommentTrap(e.target.value)}
+            style={{ position: 'absolute', left: '-9999px', width: 1, height: 1, opacity: 0 }}
+          />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <input
               type="text"

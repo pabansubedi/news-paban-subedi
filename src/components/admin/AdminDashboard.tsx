@@ -58,6 +58,14 @@ const AD_SPECS: Record<AdPlacementSlot, { w: number; h: number; where: string; n
   sticky_footer: { w: 468, h: 60, where: 'स्क्रिनको तल अडिने पट्टी', note: 'उचाइ ५६ px भित्र देखिन्छ।' }
 };
 
+// a news slug becomes part of its web address: no spaces, slashes, ? # %
+const cleanSlug = (v: string) =>
+  v
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[\/\\?#%]/g, '')
+    .replace(/-+/g, '-');
+
 export const AdminDashboard: React.FC = () => {
   const {
     currentUser,
@@ -414,7 +422,7 @@ export const AdminDashboard: React.FC = () => {
     if (editingPostId) {
       updatePost(editingPostId, {
         title: postTitle,
-        slug: postSlug,
+        slug: cleanSlug(postSlug) || `nepal-news-${Date.now().toString().slice(-6)}`,
         excerpt: postExcerpt,
         content: postContent,
         category_id: postCategoryId,
@@ -431,7 +439,7 @@ export const AdminDashboard: React.FC = () => {
     } else {
       addPost({
         title: postTitle,
-        slug: postSlug,
+        slug: cleanSlug(postSlug) || `nepal-news-${Date.now().toString().slice(-6)}`,
         excerpt: postExcerpt || postContent.slice(0, 150) + '...',
         content: postContent,
         category_id: postCategoryId,

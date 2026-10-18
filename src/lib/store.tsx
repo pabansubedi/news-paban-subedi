@@ -694,7 +694,12 @@ export const NewsAppProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, []);
 
   // staff see drafts / pending posts, readers do not: re-fetch whenever the role changes
+  const roleSyncReady = useRef(false);
   useEffect(() => {
+    if (!roleSyncReady.current) {
+      roleSyncReady.current = true; // the first sync already happens on load
+      return;
+    }
     syncFromSupabase();
   }, [currentRole]);
 

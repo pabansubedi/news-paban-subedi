@@ -276,7 +276,7 @@ export const Footer: React.FC = () => {
               </button>
             )}
             <p className="flex items-center gap-1">
-              Developed by <strong className="text-slate-300">{siteSettings.editor_in_chief.split('(')[0].trim() || 'Paban Subedi'}</strong>
+              Developed by <strong className="text-slate-300">{(siteSettings.editor_in_chief || '').split('(')[0].trim() || 'Paban Subedi'}</strong>
             </p>
           </div>
         </div>
