@@ -438,7 +438,9 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
       <figure className="mb-8">
         <div className="relative rounded-2xl overflow-hidden aspect-[16/10] bg-slate-100 dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-800">
           <img loading="lazy" decoding="async"
-            src={post.featured_image}
+            src={post.featured_image || '/og-default.jpg'}
+            referrerPolicy="no-referrer"
+            onError={(e) => { const t = e.currentTarget; if (!t.src.endsWith('/og-default.jpg')) t.src = '/og-default.jpg'; }}
             alt={post.title}
             className="w-full h-full object-cover"
           />
@@ -721,7 +723,9 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
               >
                 <div className="aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
                   <img loading="lazy" decoding="async"
-                    src={rel.featured_image}
+                    src={rel.featured_image || '/og-default.jpg'}
+                    referrerPolicy="no-referrer"
+                    onError={(e) => { const t = e.currentTarget; if (!t.src.endsWith('/og-default.jpg')) t.src = '/og-default.jpg'; }}
                     alt={rel.title}
                     className="w-full h-full object-cover group-hover:scale-105 transition"
                   />

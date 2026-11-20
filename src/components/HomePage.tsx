@@ -131,7 +131,9 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
               >
                 <div className="relative aspect-[16/9] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
                   <img
-                    src={heroPost.featured_image}
+                    src={heroPost.featured_image || '/og-default.jpg'}
+                    referrerPolicy="no-referrer"
+                    onError={(e) => { const t = e.currentTarget; if (!t.src.endsWith('/og-default.jpg')) t.src = '/og-default.jpg'; }}
                     alt={heroPost.title}
                     className="w-full h-full object-cover group-hover:scale-103 transition duration-500"
                   />
@@ -239,7 +241,9 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
                 >
                   <div className="relative w-28 h-20 sm:w-32 sm:h-22 rounded-lg overflow-hidden shrink-0 bg-slate-100 dark:bg-slate-800">
                     <img loading="lazy" decoding="async"
-                      src={post.featured_image}
+                      src={post.featured_image || '/og-default.jpg'}
+                      referrerPolicy="no-referrer"
+                      onError={(e) => { const t = e.currentTarget; if (!t.src.endsWith('/og-default.jpg')) t.src = '/og-default.jpg'; }}
                       alt={post.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
@@ -314,7 +318,9 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
                   >
                     <div className="aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
                       <img loading="lazy" decoding="async"
-                        src={post.featured_image}
+                        src={post.featured_image || '/og-default.jpg'}
+                        referrerPolicy="no-referrer"
+                        onError={(e) => { const t = e.currentTarget; if (!t.src.endsWith('/og-default.jpg')) t.src = '/og-default.jpg'; }}
                         alt={post.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                       />
@@ -365,7 +371,9 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
                   >
                     <div className="aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
                       <img loading="lazy" decoding="async"
-                        src={post.featured_image}
+                        src={post.featured_image || '/og-default.jpg'}
+                        referrerPolicy="no-referrer"
+                        onError={(e) => { const t = e.currentTarget; if (!t.src.endsWith('/og-default.jpg')) t.src = '/og-default.jpg'; }}
                         alt={post.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                       />
@@ -416,7 +424,9 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
                   >
                     <div className="aspect-[4/3] overflow-hidden bg-slate-100 dark:bg-slate-800">
                       <img loading="lazy" decoding="async"
-                        src={post.featured_image}
+                        src={post.featured_image || '/og-default.jpg'}
+                        referrerPolicy="no-referrer"
+                        onError={(e) => { const t = e.currentTarget; if (!t.src.endsWith('/og-default.jpg')) t.src = '/og-default.jpg'; }}
                         alt={post.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                       />
