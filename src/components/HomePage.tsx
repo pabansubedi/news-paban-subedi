@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNewsApp } from '../lib/store';
 import { AdBanner } from './AdBanner';
-import { toNepaliDigits, getNepaliDate } from '../lib/nepaliDate';
+import { toNepaliDigits, getNepaliDate, formatTimeShortNepali } from '../lib/nepaliDate';
 import { Post } from '../types';
 import {
   Clock,
@@ -78,7 +78,7 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
     if (!dateStr) return 'भर्खरै';
     const dateObj = new Date(dateStr);
     const nepali = getNepaliDate(dateObj);
-    return `${nepali.dayName}, ${toNepaliDigits(nepali.day)} ${nepali.monthName}`;
+    return `${nepali.dayName}, ${toNepaliDigits(nepali.day)} ${nepali.monthName} • ${formatTimeShortNepali(dateObj)}`;
   };
 
   const handleCopyLink = (slug: string) => {
