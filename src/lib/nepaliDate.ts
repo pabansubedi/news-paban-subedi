@@ -159,3 +159,11 @@ export function formatTimeNepali(inputDate: Date = new Date()): string {
 
   return `${period} ${hoursStr}:${minutesStr}:${secondsStr}`;
 }
+
+
+/**
+ * Short time for news cards: "बिहान ११:२५" (Nepal time, no seconds)
+ */
+export function formatTimeShortNepali(inputDate: Date = new Date()): string {
+  return formatTimeNepali(inputDate).replace(/:[०-९]{2}$/, '');
+}
