@@ -22,3 +22,4 @@ jobs:
         run: node scripts/fetch-news.mjs
         env:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AUTO_TICKER: 'true'
