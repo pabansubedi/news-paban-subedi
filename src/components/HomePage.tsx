@@ -139,8 +139,8 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
 
       {isListMode ? (
         /* CATEGORY / TAG / SEARCH: show ALL matching news (newest first) */
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-8">
+        <div>
+          <div>
             {filteredPosts.length === 0 ? (
               <div className="text-center py-16 text-slate-500 dark:text-slate-400">यस विधामा हाल कुनै समाचार छैन।</div>
             ) : (
@@ -148,10 +148,15 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
                 <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
                   जम्मा {toNepaliDigits(filteredPosts.length)} समाचार
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {filteredPosts.slice(0, visibleCount).map((post) => (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredPosts.slice(0, visibleCount).map((post, idx) => (
+                    <React.Fragment key={post.id}>
+                    {idx === 3 && (
+                      <div className="flex items-start justify-center">
+                        <AdBanner slot="sidebar_top" />
+                      </div>
+                    )}
                     <article
-                      key={post.id}
                       onClick={() => navigateTo('article', post.slug)}
                       className="cursor-pointer group bg-white dark:bg-slate-900 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 hover:shadow-md transition"
                     >
@@ -187,6 +192,7 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
                         )}
                       </div>
                     </article>
+                    </React.Fragment>
                   ))}
                 </div>
                 {visibleCount < filteredPosts.length && (
@@ -202,9 +208,6 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
               </>
             )}
           </div>
-          <aside className="lg:col-span-4 space-y-6">
-            <AdBanner slot="sidebar_top" />
-          </aside>
         </div>
       ) : (
         <>
