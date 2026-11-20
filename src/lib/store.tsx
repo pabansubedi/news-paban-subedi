@@ -127,7 +127,10 @@ const mapPost = (p: any): Post => ({
   updated_at: p.updated_at || new Date().toISOString(),
   read_time_mins: p.read_time_mins || 3,
   tags: p.tags || [],
-  audio_url: p.audio_url || ''
+  audio_url: p.audio_url || '',
+  source_name: p.source_name || '',
+  source_url: p.source_url || '',
+  is_aggregated: !!p.is_aggregated
 });
 
 const mapComment = (c: any): Comment => ({

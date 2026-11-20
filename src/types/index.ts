@@ -48,6 +48,9 @@ export interface Post {
   read_time_mins: number;
   tags?: string[];
   audio_url?: string;
+  source_name?: string; // auto-news: original portal
+  source_url?: string; // auto-news: link to the original article
+  is_aggregated?: boolean;
 }
 
 export type AdPlacementSlot = 

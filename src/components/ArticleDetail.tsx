@@ -582,6 +582,23 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
         ))}
       </div>
 
+      {/* Auto-news: credit + link to the original article */}
+      {post.source_url && (
+        <div className="mt-8 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 no-print">
+          <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">
+            यो समाचारको सारांश हो। स्रोत: <strong>{post.source_name}</strong>
+          </p>
+          <a
+            href={post.source_url}
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            className="inline-block bg-red-600 hover:bg-red-700 text-white text-sm font-bold px-4 py-2 rounded-lg"
+          >
+            पूरा समाचार {post.source_name} मा पढ्नुहोस् →
+          </a>
+        </div>
+      )}
+
       {/* Tags */}
       {post.tags && post.tags.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mt-8 pt-6 border-t border-slate-200 dark:border-slate-800 no-print">
