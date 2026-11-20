@@ -27,7 +27,12 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
 
   // ONLY show posts that are approved & published by Admin!
-  const publishedPosts = posts.filter((p) => p.status === 'published');
+  // newest first (by publish time) so every section shows the latest news on top
+  const postTime = (p: { published_at: string | null; created_at: string }) =>
+    new Date(p.published_at || p.created_at).getTime() || 0;
+  const publishedPosts = posts
+    .filter((p) => p.status === 'published')
+    .sort((a, b) => postTime(b) - postTime(a));
 
   // Filter by category or search query if requested
   const filteredPosts = publishedPosts.filter((post) => {
@@ -48,7 +53,14 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
   });
 
   // Hero Lead Post (Featured or first breaking post)
-  const heroPost = filteredPosts.find((p) => p.is_featured) || filteredPosts[0];
+  // A featured / breaking news stays the lead only for 24 hours; after that the newest news
+  // that has a photo takes the lead, so an old pinned news never blocks the latest ones.
+  const FRESH_MS = 24 * 3600 * 1000;
+  const isFresh = (p: { published_at: string | null; created_at: string }) => Date.now() - postTime(p) < FRESH_MS;
+  const heroPost =
+    filteredPosts.find((p) => (p.is_featured || p.is_breaking) && isFresh(p)) ||
+    filteredPosts.slice(0, 10).find((p) => !!p.featured_image) ||
+    filteredPosts[0];
 
   // Secondary Leads (up to 3 other posts)
   const secondaryLeadPosts = filteredPosts
