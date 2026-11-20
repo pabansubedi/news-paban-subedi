@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNewsApp } from '../lib/store';
 import { AdBanner } from './AdBanner';
 import { toNepaliDigits, getNepaliDate, formatTimeShortNepali } from '../lib/nepaliDate';
@@ -25,6 +25,12 @@ interface HomePageProps {
 export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery, tagFilter }) => {
   const { posts, categories, navigateTo, siteSettings, postsLoaded } = useNewsApp();
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
+  const PAGE_SIZE = 24;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const isListMode = !!(categoryFilter || searchQuery || tagFilter);
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [categoryFilter, searchQuery, tagFilter]);
 
   // ONLY show posts that are approved & published by Admin!
   // newest first (by publish time) so every section shows the latest news on top
@@ -131,6 +137,77 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
         </div>
       )}
 
+      {isListMode ? (
+        /* CATEGORY / TAG / SEARCH: show ALL matching news (newest first) */
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <div className="lg:col-span-8">
+            {filteredPosts.length === 0 ? (
+              <div className="text-center py-16 text-slate-500 dark:text-slate-400">यस विधामा हाल कुनै समाचार छैन।</div>
+            ) : (
+              <>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                  जम्मा {toNepaliDigits(filteredPosts.length)} समाचार
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {filteredPosts.slice(0, visibleCount).map((post) => (
+                    <article
+                      key={post.id}
+                      onClick={() => navigateTo('article', post.slug)}
+                      className="cursor-pointer group bg-white dark:bg-slate-900 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 hover:shadow-md transition"
+                    >
+                      <div className="aspect-[16/10] overflow-hidden bg-slate-100 dark:bg-slate-800">
+                        <img
+                          loading="lazy"
+                          decoding="async"
+                          src={post.featured_image || '/og-default.jpg'}
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            const t = e.currentTarget;
+                            if (!t.src.endsWith('/og-default.jpg')) t.src = '/og-default.jpg';
+                          }}
+                          alt={post.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                        />
+                      </div>
+                      <div className="p-3">
+                        <h4 className="font-bold text-sm text-slate-900 dark:text-white line-clamp-2 group-hover:text-amber-600 transition">
+                          {post.title}
+                        </h4>
+                        <div className="flex items-center justify-between gap-2 mt-2 text-[11px] text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {formatPublishDate(post.published_at || post.created_at)}
+                          </span>
+                          <span className="shrink-0">{toNepaliDigits(post.views)} पटक पढिएको</span>
+                        </div>
+                        {post.source_name && (
+                          <span className="text-[11px] text-red-600 dark:text-red-400 font-semibold mt-1 block">
+                            स्रोत: {post.source_name}
+                          </span>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                {visibleCount < filteredPosts.length && (
+                  <div className="text-center mt-6">
+                    <button
+                      onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                      className="bg-red-600 hover:bg-red-700 text-white text-sm font-bold px-6 py-2.5 rounded-lg cursor-pointer"
+                    >
+                      थप समाचार हेर्नुहोस्
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          <aside className="lg:col-span-4 space-y-6">
+            <AdBanner slot="sidebar_top" />
+          </aside>
+        </div>
+      ) : (
+        <>
       {/* 1. HERO LEAD NEWS SECTION */}
       {heroPost ? (
         <section className="mb-8">
@@ -535,6 +612,8 @@ export const HomePage: React.FC<HomePageProps> = ({ categoryFilter, searchQuery,
           </div>
         </aside>
       </div>
+        </>
+      )}
     </div>
   );
 };
