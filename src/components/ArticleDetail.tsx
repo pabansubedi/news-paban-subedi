@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNewsApp } from '../lib/store';
 import { AdBanner } from './AdBanner';
-import { toNepaliDigits, getNepaliDate } from '../lib/nepaliDate';
+import { toNepaliDigits, getNepaliDate, formatTimeShortNepali } from '../lib/nepaliDate';
 import {
   Volume2,
   VolumeX,
@@ -337,7 +337,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
       <div className="hidden print-only mb-6 border-b-2 border-black pb-4 text-center">
         <h1 className="text-2xl font-bold">{siteSettings.site_title}</h1>
         <p className="text-xs">{siteSettings.subdomain} | {siteSettings.office_address}</p>
-        <p className="text-xs font-bold mt-1">प्रकाशित मिति: {nepaliDate.formattedNepali}</p>
+        <p className="text-xs font-bold mt-1">प्रकाशित मिति: {nepaliDate.formattedNepali} • {formatTimeShortNepali(publishDateObj)}</p>
       </div>
 
       {/* Title */}
@@ -376,7 +376,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ slug }) => {
         <div className="flex flex-wrap items-center gap-4 text-xs">
           <span className="flex items-center gap-1.5 font-medium">
             <Calendar className="w-4 h-4 text-red-600" />
-            {nepaliDate.formattedNepali}
+            {nepaliDate.formattedNepali} • {formatTimeShortNepali(publishDateObj)}
           </span>
           <span className="flex items-center gap-1.5 font-medium">
             <Eye className="w-4 h-4 text-blue-600" />
