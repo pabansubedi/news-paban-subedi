@@ -19,6 +19,9 @@ const MAX_PER_FEED = Number(process.env.MAX_PER_FEED || 8);     // newest items 
 const MAX_AGE_HOURS = Number(process.env.MAX_AGE_HOURS || 36);  // older items are ignored
 const KEEP_HOURS = Number(process.env.KEEP_HOURS || 48);        // auto-news older than this is deleted
 const MAX_KEEP = Number(process.env.MAX_KEEP || 600);           // never keep more than this many auto-news
+const BREAKING_HOURS = Number(process.env.BREAKING_HOURS || 3); // "breaking" badge is removed after this many hours
+const AUTO_TICKER = process.env.AUTO_TICKER === 'true';         // rewrite the top news ticker with the latest headlines
+const BREAKING_RE = /ब्रेकिङ|ब्रेकिंग|तत्काल|\bbreaking\b|\bjust in\b|\bflash\b/i;
 
 if (!SUPABASE_URL || !KEY) {
   console.error('SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing.');
@@ -48,6 +51,18 @@ const tag = (block, name) => {
 };
 const allTags = (block, name) => [...block.matchAll(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'gi'))].map((m) => stripHtml(m[1]));
 const attr = (str, name) => new RegExp(`${name}\\s*=\\s*["']([^"']+)["']`, 'i').exec(str)?.[1] || '';
+// same article can come with ?utm_..., http/https, www., trailing slash: treat them as one
+function normalizeUrl(u) {
+  try {
+    const x = new URL(u);
+    x.hash = '';
+    for (const k of [...x.searchParams.keys()]) if (/^(utm_|fbclid|gclid|ref|source|amp)/i.test(k)) x.searchParams.delete(k);
+    return (x.hostname.replace(/^(www|m|amp)\./, '') + x.pathname.replace(/\/+$/, '') + x.search).toLowerCase();
+  } catch {
+    return u;
+  }
+}
+const titleKey = (t) => t.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
 const clip = (s, n) => (s.length <= n ? s : s.slice(0, n).replace(/\s+\S*$/, '') + '…');
 
 async function get(url, accept = '*/*') {
@@ -151,7 +166,9 @@ function guessCategory(item, def) {
 }
 
 // ---------- Supabase REST ----------
-const H = { apikey: KEY, authorization: `Bearer ${KEY}`, 'content-type': 'application/json' };
+// new-style keys (sb_secret_...) are not JWTs: send them in `apikey` only. Old service_role JWT also works.
+const H = { apikey: KEY, 'content-type': 'application/json' };
+if (!KEY.startsWith('sb_')) H.authorization = `Bearer ${KEY}`;
 async function sb(pathAndQuery, init = {}) {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${pathAndQuery}`, { ...init, headers: { ...H, ...(init.headers || {}) } });
   const text = await r.text();
@@ -167,6 +184,10 @@ async function main() {
   const results = await Promise.allSettled(SOURCES.map((s) => loadItems(s)));
   const rows = [];
   const seen = new Set();
+  // titles already saved in the last 2 days (a re-posted article must not be added twice)
+  const seenTitles = new Set(
+    (await sb(`posts?is_aggregated=eq.true&select=title&order=published_at.desc&limit=1000`)).map((p) => titleKey(p.title))
+  );
   results.forEach((res, i) => {
     const src = SOURCES[i];
     if (res.status !== 'fulfilled' || !res.value.items.length) {
@@ -179,9 +200,11 @@ async function main() {
       .slice(0, MAX_PER_FEED);
     console.log(`✓ ${src.name}: ${fresh.length} fresh / ${res.value.items.length} in feed  (${res.value.feed})`);
     for (const it of fresh) {
-      const slug = 'src-' + crypto.createHash('sha1').update(it.link).digest('hex').slice(0, 14);
-      if (seen.has(slug)) continue;
+      const slug = 'src-' + crypto.createHash('sha1').update(normalizeUrl(it.link)).digest('hex').slice(0, 14);
+      const tk = titleKey(it.title);
+      if (seen.has(slug) || seenTitles.has(tk)) continue;
       seen.add(slug);
+      seenTitles.add(tk);
       rows.push({
         title: it.title,
         slug,
@@ -197,7 +220,7 @@ async function main() {
         published_at: it.date.toISOString(),
         read_time_mins: 1,
         tags: [src.name],
-        is_breaking: false,
+        is_breaking: BREAKING_RE.test(it.title),
         is_featured: false,
         source_name: src.name,
         source_url: it.link,
@@ -217,6 +240,31 @@ async function main() {
     added += out?.length || 0;
   }
   console.log(`\nAdded ${added} new news (checked ${rows.length}).`);
+
+  // breaking badge expires after BREAKING_HOURS
+  const bCut = new Date(Date.now() - BREAKING_HOURS * 3600e3).toISOString();
+  await sb(`posts?is_aggregated=eq.true&is_breaking=eq.true&published_at=lt.${encodeURIComponent(bCut)}`, {
+    method: 'PATCH',
+    headers: { prefer: 'return=minimal' },
+    body: JSON.stringify({ is_breaking: false })
+  });
+
+  // top ticker = latest headlines (only when AUTO_TICKER=true; it replaces the ticker text typed in admin)
+  if (AUTO_TICKER) {
+    const latest = (await sb('posts?is_aggregated=eq.true&status=eq.published&select=title&order=published_at.desc&limit=8')) || [];
+    const text = latest.map((p) => clip(p.title, 90)).join(' • ');
+    if (latest.length >= 3) {
+      const st = await sb('site_settings?select=id&limit=1');
+      if (st?.[0]?.id) {
+        await sb(`site_settings?id=eq.${st[0].id}`, {
+          method: 'PATCH',
+          headers: { prefer: 'return=minimal' },
+          body: JSON.stringify({ breaking_news_ticker: text, is_ticker_active: true })
+        });
+        console.log('Ticker updated.');
+      }
+    }
+  }
 
   // clean-up: delete old auto-news, then keep only the newest MAX_KEEP
   const cutoff = new Date(Date.now() - KEEP_HOURS * 3600e3).toISOString();
