@@ -56,9 +56,28 @@ export const Header: React.FC = () => {
   const activeCategories = categories.filter((c) => c.is_active);
 
   // Published breaking or top posts for the running ticker
-  const tickerItems = posts
+  // Breaking news first, then the newest news. Every headline is clickable.
+  const tickerTime = (p: { published_at: string | null; created_at: string }) =>
+    new Date(p.published_at || p.created_at).getTime() || 0;
+  const publishedForTicker = posts
     .filter((p) => p.status === 'published')
-    .slice(0, 10);
+    .sort((a, b) => tickerTime(b) - tickerTime(a));
+  const tickerItems = [
+    ...publishedForTicker.filter((p) => p.is_breaking),
+    ...publishedForTicker.filter((p) => !p.is_breaking)
+  ].slice(0, 12);
+
+  // Text typed in admin ticker box: a part that is the (start of the) title of a real news is
+  // already shown above as a clickable headline, so only the remaining custom text stays plain.
+  const normTitle = (t: string) => t.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+  const extraTickerTexts = (siteSettings.breaking_news_ticker || '')
+    .split('•')
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .filter((seg) => {
+      const k = normTitle(seg.replace(/…$/, ''));
+      return k.length > 0 && !publishedForTicker.some((p) => normTitle(p.title).startsWith(k));
+    });
 
   const scrollDuration = siteSettings.ticker_speed || 85;
 
@@ -180,12 +199,12 @@ export const Header: React.FC = () => {
                     </button>
                   ))}
 
-                  {siteSettings.breaking_news_ticker && (
-                    <span className="inline-flex items-center gap-2 text-amber-100 text-xs sm:text-sm px-4 font-semibold shrink-0">
+                  {extraTickerTexts.map((txt, i) => (
+                    <span key={`x-${i}`} className="inline-flex items-center gap-2 text-amber-100 text-xs sm:text-sm px-4 font-semibold shrink-0">
                       <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
-                      <span>{siteSettings.breaking_news_ticker}</span>
+                      <span>{txt}</span>
                     </span>
-                  )}
+                  ))}
                 </div>
 
                 {/* SET 2 (Duplicate for seamless continuous loop) */}
@@ -204,12 +223,12 @@ export const Header: React.FC = () => {
                     </button>
                   ))}
 
-                  {siteSettings.breaking_news_ticker && (
-                    <span className="inline-flex items-center gap-2 text-amber-100 text-xs sm:text-sm px-4 font-semibold shrink-0">
+                  {extraTickerTexts.map((txt, i) => (
+                    <span key={`x-${i}`} className="inline-flex items-center gap-2 text-amber-100 text-xs sm:text-sm px-4 font-semibold shrink-0">
                       <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
-                      <span>{siteSettings.breaking_news_ticker}</span>
+                      <span>{txt}</span>
                     </span>
-                  )}
+                  ))}
                 </div>
               </div>
             </div>
